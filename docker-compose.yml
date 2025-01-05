@@ -26,6 +26,12 @@ services:
         docker-entrypoint.sh postgres &
         trap "/scripts/backup_db.sh; exit 0" SIGTERM
         wait $!'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   bot:
     build: .
@@ -47,6 +53,12 @@ services:
       - OFFICER_ROLE_ID=${OFFICER_ROLE_ID}
       - CLAN1_ROLE_ID=${CLAN1_ROLE_ID}
       - CLAN2_ROLE_ID=${CLAN2_ROLE_ID}
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   api:
     build: .
@@ -64,6 +76,12 @@ services:
       - DB_NAME=${DB_NAME}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data: 

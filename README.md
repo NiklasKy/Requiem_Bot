@@ -8,6 +8,7 @@ A Discord bot for managing AFK status and clan members.
 - Clan member management
 - REST API for external access
 - Automatic database backups
+- Automatic container recovery
 
 ## Installation
 
@@ -17,6 +18,61 @@ A Discord bot for managing AFK status and clan members.
 4. Start with:
 ```bash
 docker-compose up -d
+```
+
+## Automatic Recovery Setup
+
+The bot can be configured to automatically restart after system crashes or reboots.
+
+### Docker Container Configuration
+The `docker-compose.yml` includes:
+- Automatic container restarts (`restart: unless-stopped`)
+- Health checks for the database
+- Log rotation (10MB per file, max 3 files)
+- Automatic database backups on shutdown
+
+### Windows Service Setup
+1. Open PowerShell as Administrator
+2. Navigate to the project directory
+3. Adjust the path in `scripts/install_service.ps1`:
+```powershell
+$projectPath = "path/to/your/project"  # Change this
+```
+
+4. Run the installation script:
+```powershell
+.\scripts\install_service.ps1
+```
+
+5. Start the service:
+```powershell
+Start-Service RequiemBotDocker
+```
+
+The service will:
+- Start automatically with Windows
+- Restart containers after crashes
+- Ensure proper shutdown with database backups
+- Maintain log rotation
+
+### Verifying the Setup
+1. Check service status:
+```powershell
+Get-Service RequiemBotDocker
+```
+
+2. View logs:
+```powershell
+docker-compose logs
+```
+
+3. Test automatic recovery:
+```powershell
+# Stop the service
+Stop-Service RequiemBotDocker
+
+# Start it again
+Start-Service RequiemBotDocker
 ```
 
 ## Database Backups
