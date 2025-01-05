@@ -1,8 +1,10 @@
-# Python
+# Python bytecode and cache
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# Python distribution and packaging
 .Python
 build/
 develop-eggs/
@@ -25,33 +27,37 @@ venv/
 env/
 ENV/
 
-# IDE
+# IDE and Editor files
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# Logs
-*.log
+# Logs and debugging
 logs/
+*.log
 
-# Database
-*.db
-*.sqlite3
-
-# Environment variables
+# Environment and Configuration
 .env
 .env.local
 .env.*.local
+config.py
+
+# Database files
+*.sqlite
+*.sqlite3
+*.db
+bot_database.db
+
+# Database Backups
+backups/
+*.sql
+*.sql.gz
+db_backup_*
 
 # Docker
 .docker/
-docker-compose.override.yml
 
-# System Files
-.DS_Store
-Thumbs.db
-
-# Application specific
-config.py
-bot_database.db 
+# Operating System
+.DS_Store     # macOS
+Thumbs.db     # Windows 

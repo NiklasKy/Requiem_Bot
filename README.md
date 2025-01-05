@@ -1,124 +1,127 @@
 # Requiem Bot
 
-A Discord bot and API service for managing clan members and AFK status tracking.
+A Discord bot for managing AFK status and clan members.
 
 ## Features
 
-- Discord Bot Commands:
-  - `/afk` - Set AFK status
-  - `/afk delete` - Delete AFK entries
-  - `/afk history` - View AFK history
-  - `/afk stats` - View AFK statistics
-  - `/afk my` - View your AFK status
-  - `/afk return` - Return from AFK
-  - `/afk list` - List all AFK members
-  - `/afk quick` - Quick AFK setting
-  - `/check signups` - Check raid signups
-  - `/get members` - List clan members
-
-- REST API for accessing member and group data
-- PostgreSQL database for data persistence
-- Docker containerization for easy deployment
-
-## Prerequisites
-
-- Docker and Docker Compose
-- Discord Bot Token
-- Discord Server with appropriate roles set up
+- AFK status management
+- Clan member management
+- REST API for external access
+- Automatic database backups
 
 ## Installation
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/requiem-bot.git
-   cd requiem-bot
-   ```
-
-2. Create and configure the environment file:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-3. Build and start the Docker containers:
-   ```bash
-   docker-compose up -d
-   ```
-
-## Environment Variables
-
-Copy `.env.example` to `.env` and configure the following variables:
-
-- `DISCORD_TOKEN`: Your Discord bot token
-- `DISCORD_GUILD_ID`: Your Discord server ID
-- `ADMIN_ROLE_ID`: Admin role ID
-- `OFFICER_ROLE_ID`: Officer role ID
-- `CLAN1_ROLE_ID`: Requiem Sun role ID
-- `CLAN2_ROLE_ID`: Requiem Moon role ID
-- Database credentials and other configurations
-
-## Project Structure
-
+1. Clone repository
+2. Create `.env` file (see `.env.example`)
+3. Install Docker and Docker Compose
+4. Start with:
+```bash
+docker-compose up -d
 ```
-requiem-bot/
-├── src/
-│   ├── api/         # FastAPI application
-│   ├── bot/         # Discord bot
-│   ├── database/    # Database models and utilities
-│   ├── utils/       # Shared utilities
-│   └── tests/       # Test files
-├── data/            # Persistent data
-├── logs/            # Application logs
-├── .env.example     # Environment variables template
-├── docker-compose.yml
-├── Dockerfile
-└── requirements.txt
+
+## Database Backups
+
+The bot automatically creates backups of the PostgreSQL database:
+
+### Automatic Backups
+- Created when the container shuts down
+- Storage location: `./backups/`
+- Format: `db_backup_YYYYMMDD_HHMMSS.sql.gz`
+- Retention: 7 days
+
+### Create Manual Backup
+```bash
+docker-compose exec db /scripts/backup_db.sh
 ```
+
+### Restore Backup
+```bash
+# Unzip backup
+gunzip db_backup_YYYYMMDD_HHMMSS.sql.gz
+
+# Import into database
+docker-compose exec -T db psql -U ${DB_USER} ${DB_NAME} < db_backup_YYYYMMDD_HHMMSS.sql
+```
+
+### Backup Configuration
+The backup settings can be adjusted in the following files:
+- `docker-compose.yml`: Container configuration
+- `scripts/backup_db.sh`: Backup script
+
+## API Endpoints
+
+- `GET /api/afk`: List all active AFK entries
+- `GET /api/afk/{discord_id}`: Get AFK entries for a specific user
+- `POST /api/afk`: Create new AFK entry
+- `GET /api/clan/{clan_role_id}/members`: List all members of a clan
+- `GET /api/discord/role/{role_id}/members`: List all Discord members of a role
+
+## Discord Commands
+
+### AFK Management
+- `/afk <start_date> <start_time> <end_date> <end_time> <reason>`: Set AFK status with specific dates
+- `/afkquick <reason> [days]`: Quick AFK until end of day (or specified number of days)
+- `/afkreturn`: End AFK status
+- `/afklist`: Show all active AFK users
+- `/afkmy`: Show your personal AFK entries
+- `/afkhistory <user>`: Show AFK history for a user (admin only)
+- `/afkdelete <user> [all_entries]`: Delete AFK entries (admin only)
+- `/afkstats`: Show AFK statistics (admin only)
+
+### Member Management
+- `/getmembers <role>`: List members with a specific role (admin only)
 
 ## Development
 
-1. Create a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Linux/macOS
-   .\venv\Scripts\activate   # Windows
-   ```
+### Prerequisites
+- Python 3.9+
+- Docker & Docker Compose
+- PostgreSQL (provided via Docker)
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Run the services locally:
-   ```bash
-   # Run the bot
-   python -m src.bot.main
-
-   # Run the API (in a separate terminal)
-   uvicorn src.api.main:app --reload
-   ```
-
-## Testing
-
-Run the test suite:
+### Developer Setup
+1. Create virtual environment:
 ```bash
-pytest
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+.\venv\Scripts\activate   # Windows
 ```
 
-## API Documentation
+2. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-Once the API is running, access the documentation at:
-- Swagger UI: `http://localhost:3000/docs`
-- ReDoc: `http://localhost:3000/redoc`
+3. Start development server:
+```bash
+docker-compose up -d
+```
 
-## Contributing
+### Database Migration
+To migrate data from a SQLite database to PostgreSQL:
+```bash
+# Copy SQLite DB to container
+docker cp path/to/sqlite.db requiem_bot-api-1:/app/data/
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+# Run migration
+docker-compose exec api python -m src.database.migrate /app/data/sqlite.db
+```
 
-## License
+### Command Parameters
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+#### /afk
+- `start_date`: Start date (DDMM, DD/MM or DD.MM)
+- `start_time`: Start time (HHMM or HH:MM)
+- `end_date`: End date (DDMM, DD/MM or DD.MM)
+- `end_time`: End time (HHMM or HH:MM)
+- `reason`: Reason for being AFK
+
+#### /afkquick
+- `reason`: Reason for being AFK
+- `days` (optional): Number of days to be AFK (default: until end of today)
+
+#### /afkdelete
+- `user`: The user whose AFK entries you want to delete
+- `all_entries` (optional): Delete all entries for this user? If false, only deletes active entries
+
+#### /getmembers
+- `role`: The role to check members for 

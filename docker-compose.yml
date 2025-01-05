@@ -9,6 +9,8 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+      - ./scripts:/scripts
     ports:
       - "5432:5432"
     healthcheck:
@@ -16,6 +18,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    stop_grace_period: 1m
+    stop_signal: SIGTERM
+    command: |
+      bash -c '
+        chmod +x /scripts/backup_db.sh
+        docker-entrypoint.sh postgres &
+        trap "/scripts/backup_db.sh; exit 0" SIGTERM
+        wait $!'
 
   bot:
     build: .
