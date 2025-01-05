@@ -22,57 +22,48 @@ docker-compose up -d
 
 ## Automatic Recovery Setup
 
-The bot can be configured to automatically restart after system crashes or reboots.
+The bot is configured to automatically restart after system crashes or reboots.
 
-### Docker Container Configuration
+### Docker Configuration
 The `docker-compose.yml` includes:
 - Automatic container restarts (`restart: unless-stopped`)
 - Health checks for the database
 - Log rotation (10MB per file, max 3 files)
 - Automatic database backups on shutdown
 
-### Windows Service Setup
-1. Open PowerShell as Administrator
-2. Navigate to the project directory
-3. Adjust the path in `scripts/install_service.ps1`:
-```powershell
-$projectPath = "path/to/your/project"  # Change this
-```
+### Windows Setup
+1. Ensure Docker Desktop is installed
+2. Configure Docker Desktop to start automatically:
+   - Open Docker Desktop
+   - Go to Settings (⚙️)
+   - General
+   - Check "Start Docker Desktop when you log in"
+   - Apply & Restart
 
-4. Run the installation script:
-```powershell
-.\scripts\install_service.ps1
-```
-
-5. Start the service:
-```powershell
-Start-Service RequiemBotDocker
-```
-
-The service will:
-- Start automatically with Windows
-- Restart containers after crashes
+The containers will:
+- Start automatically with Docker
+- Restart after crashes
 - Ensure proper shutdown with database backups
 - Maintain log rotation
 
 ### Verifying the Setup
-1. Check service status:
-```powershell
-Get-Service RequiemBotDocker
+1. Check container status:
+```bash
+docker-compose ps
 ```
 
 2. View logs:
-```powershell
+```bash
 docker-compose logs
 ```
 
 3. Test automatic recovery:
-```powershell
-# Stop the service
-Stop-Service RequiemBotDocker
+```bash
+# Stop all containers
+docker-compose down
 
-# Start it again
-Start-Service RequiemBotDocker
+# Start them again
+docker-compose up -d
 ```
 
 ## Database Backups
