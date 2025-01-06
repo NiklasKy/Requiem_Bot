@@ -20,14 +20,21 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Create necessary directories with correct permissions
+RUN mkdir -p logs data backups \
+    && chown -R 1000:1000 /app \
+    && chmod -R 755 /app
+
 # Copy project files
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p logs data
+# Set correct permissions for copied files
+RUN chown -R 1000:1000 /app \
+    && chmod -R 755 /app \
+    && chmod -R 777 /app/logs
 
 # Create non-root user
-RUN useradd -m botuser && chown -R botuser:botuser /app
+RUN useradd -u 1000 -m botuser
 USER botuser
 
 # Command to run the application

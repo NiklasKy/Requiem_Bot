@@ -19,6 +19,9 @@ from src.database.operations import (delete_afk_entries, get_active_afk,
                                    update_afk_active_status)
 from src.utils.time_parser import parse_date, parse_time
 
+# Create logs directory if it doesn't exist
+os.makedirs("logs", exist_ok=True)
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
