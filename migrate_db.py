@@ -21,10 +21,11 @@ def get_db_url():
     """Get database URL from environment variables."""
     db_host = os.getenv("DB_HOST", "db")
     db_port = os.getenv("DB_PORT", "5432")
-    db_name = os.getenv("DB_NAME", "requiembot")
+    db_name = os.getenv("DB_NAME", "postgres")
     db_user = os.getenv("DB_USER", "postgres")
-    db_pass = os.getenv("DB_PASS", "postgres")
+    db_pass = os.getenv("DB_PASSWORD", "postgres")
     
+    logger.info(f"Connecting to PostgreSQL at {db_host}:{db_port} as {db_user}")
     return f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
 
 def migrate_data():
