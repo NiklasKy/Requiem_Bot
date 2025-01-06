@@ -3,10 +3,10 @@ from datetime import datetime, timedelta
 from typing import Tuple
 
 def parse_time(time_str: str) -> Tuple[int, int]:
-    """Parse time string in various formats (HH:MM or HHMM).
+    """Parse a time string into hour and minute.
     
     Args:
-        time_str: Time string in format HH:MM or HHMM
+        time_str: Time string in format HHMM or HH:MM
         
     Returns:
         Tuple of (hour, minute)
@@ -14,28 +14,59 @@ def parse_time(time_str: str) -> Tuple[int, int]:
     Raises:
         ValueError: If time format is invalid
     """
-    clean_time = time_str.replace(':', '')
+    # Remove any separators
+    time_str = time_str.replace(":", "")
     
-    if len(clean_time) != 4:
-        raise ValueError("Time must be in format: HHMM or HH:MM")
-    
-    try:
-        hour = int(clean_time[:2])
-        minute = int(clean_time[2:])
+    if not time_str.isdigit() or len(time_str) != 4:
+        raise ValueError("Invalid time format. Please use HHMM or HH:MM")
         
-        if not (0 <= hour <= 23 and 0 <= minute <= 59):
-            raise ValueError("Invalid hour or minute")
-            
-        return hour, minute
-    except ValueError as e:
-        raise ValueError(f"Invalid time format: {str(e)}")
+    hour = int(time_str[:2])
+    minute = int(time_str[2:])
+    
+    # Basic validation
+    if hour < 0 or hour > 23:
+        raise ValueError("Hour must be between 0 and 23")
+    if minute < 0 or minute > 59:
+        raise ValueError("Minute must be between 0 and 59")
+        
+    return hour, minute
 
-def parse_date(date_str: str, time_str: str) -> datetime:
-    """Parse date string and time string into datetime object.
+def parse_date(date_str: str) -> datetime:
+    """Parse a date string into a date object.
     
     Args:
-        date_str: Date string in format DD.MM, DD/MM or DDMM
-        time_str: Time string in format HH:MM or HHMM
+        date_str: Date string in format DDMM, DD/MM or DD.MM
+        
+    Returns:
+        datetime object with just the date part set (time will be 00:00)
+        
+    Raises:
+        ValueError: If date format is invalid
+    """
+    # Remove any separators
+    date_str = date_str.replace(".", "").replace("/", "")
+    
+    if not date_str.isdigit() or len(date_str) != 4:
+        raise ValueError("Invalid date format. Please use DDMM, DD/MM or DD.MM")
+        
+    day = int(date_str[:2])
+    month = int(date_str[2:])
+    
+    # Basic validation
+    if month < 1 or month > 12:
+        raise ValueError("Month must be between 1 and 12")
+    if day < 1 or day > 31:
+        raise ValueError("Day must be between 1 and 31")
+        
+    # Create date with current year
+    return datetime(year=datetime.utcnow().year, month=month, day=day)
+
+def parse_datetime(date_str: str, time_str: str) -> datetime:
+    """Parse date and time strings into a datetime object.
+    
+    Args:
+        date_str: Date string in format DDMM, DD/MM or DD.MM
+        time_str: Time string in format HHMM or HH:MM
         
     Returns:
         datetime object
@@ -43,35 +74,33 @@ def parse_date(date_str: str, time_str: str) -> datetime:
     Raises:
         ValueError: If date or time format is invalid
     """
-    current_date = datetime.utcnow()
+    # Parse date
+    date = parse_date(date_str)
     
-    clean_date = date_str.replace('.', '').replace('/', '')
-    if len(clean_date) != 4:
-        raise ValueError("Date must be in format: DDMM, DD/MM or DD.MM")
+    # Parse time
+    hour, minute = parse_time(time_str)
     
-    try:
-        day = int(clean_date[:2])
-        month = int(clean_date[2:])
+    # Create datetime object with current year
+    dt = datetime(
+        year=date.year,
+        month=date.month,
+        day=date.day,
+        hour=hour,
+        minute=minute
+    )
+    
+    # Check if the datetime is in the past
+    current_time = datetime.utcnow()
+    if dt < current_time:
+        # If it's within 14 days in the past, it's probably a mistake
+        days_in_past = (current_time - dt).days
+        if days_in_past <= 14:
+            raise ValueError("The start date/time cannot be in the past! Please check your input.")
         
-        if not (1 <= month <= 12 and 1 <= day <= 31):
-            raise ValueError("Invalid day or month")
-            
-        hour, minute = parse_time(time_str)
-        
-        # Start with current year
-        year = current_date.year
-        
-        # Create datetime object
-        date_time = datetime(year, month, day, hour, minute)
-        
-        # If date is in the past, add a year
-        if date_time < current_date:
-            date_time = datetime(year + 1, month, day, hour, minute)
-            
-        return date_time
-        
-    except ValueError as e:
-        raise ValueError(f"Invalid date or time format: {str(e)}")
+        # If it's more than 14 days in the past, move it to next year
+        dt = dt.replace(year=dt.year + 1)
+    
+    return dt
 
 def format_duration(duration: timedelta) -> str:
     """Format a timedelta into a human-readable string.
