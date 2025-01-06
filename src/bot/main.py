@@ -56,15 +56,21 @@ class RequiemBot(commands.Bot):
             logging.info("Starting to sync commands...")
             guild = discord.Object(id=GUILD_ID)
             
-            # Clear all commands first
-            self.tree.clear_commands(guild=None)  # Clear global commands
-            self.tree.clear_commands(guild=guild)  # Clear guild commands
-            await self.tree.sync()  # Sync to clear commands globally
+            # First, clear all commands everywhere
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()  # Sync to clear global commands
             
-            # Then sync only to the guild
+            # Then clear guild-specific commands
+            self.tree.clear_commands(guild=guild)
+            await self.tree.sync(guild=guild)  # Sync to clear guild commands
+            
+            # Copy global commands to guild
+            self.tree.copy_global_to(guild=guild)
+            
+            # Final sync to add all commands
             synced = await self.tree.sync(guild=guild)
             
-            logging.info(f"Successfully synced {len(synced)} command(s)")
+            logging.info(f"Successfully synced {len(synced)} command(s) to guild {GUILD_ID}")
             for command in synced:
                 logging.info(f"Synced command: {command.name}")
                 
