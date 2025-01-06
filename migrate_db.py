@@ -40,18 +40,6 @@ def migrate_data():
         sqlite_conn = sqlite3.connect(sqlite_path)
         sqlite_cursor = sqlite_conn.cursor()
         
-        # Get table names
-        sqlite_cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = sqlite_cursor.fetchall()
-        logger.info("Found tables in SQLite database:")
-        for table in tables:
-            logger.info(f"- {table[0]}")
-            # Get table schema
-            sqlite_cursor.execute(f"PRAGMA table_info({table[0]})")
-            columns = sqlite_cursor.fetchall()
-            for col in columns:
-                logger.info(f"  - {col[1]} ({col[2]})")
-        
         # Connect to PostgreSQL
         logger.info("Connecting to PostgreSQL database...")
         engine = create_engine(get_db_url())
@@ -59,11 +47,83 @@ def migrate_data():
         Session = sessionmaker(bind=engine)
         pg_session = Session()
         
+        # First, create a mapping of user_ids
+        user_id_mapping = {}
+        
+        # Get unique users from afk_users table
+        logger.info("Creating users from AFK entries...")
+        sqlite_cursor.execute("""
+            SELECT DISTINCT user_id, display_name, clan_role_id 
+            FROM afk_users
+        """)
+        unique_users = sqlite_cursor.fetchall()
+        
+        for user_data in unique_users:
+            old_user_id, display_name, clan_role_id = user_data
+            
+            # Create new user
+            user = User(
+                discord_id=str(old_user_id),  # Use old user_id as discord_id
+                username=display_name,  # Use display_name as username initially
+                display_name=display_name,
+                clan_role_id=str(clan_role_id) if clan_role_id else None
+            )
+            pg_session.add(user)
+            pg_session.flush()  # Get the new user_id
+            user_id_mapping[old_user_id] = user.id
+        
+        pg_session.commit()
+        logger.info(f"Created {len(unique_users)} users")
+        
+        # Migrate AFK entries
+        logger.info("Migrating AFK entries...")
+        sqlite_cursor.execute("""
+            SELECT id, user_id, start_date, end_date, reason, 
+                   is_active, created_at, ended_at
+            FROM afk_users
+        """)
+        afk_entries = sqlite_cursor.fetchall()
+        
+        for afk_data in afk_entries:
+            (old_id, old_user_id, start_date, end_date, reason, 
+             is_active, created_at, ended_at) = afk_data
+            
+            # Map old user_id to new user_id
+            new_user_id = user_id_mapping[old_user_id]
+            
+            # Convert string dates to datetime objects
+            try:
+                start_date = datetime.fromisoformat(start_date) if start_date else None
+                end_date = datetime.fromisoformat(end_date) if end_date else None
+                created_at = datetime.fromisoformat(created_at) if created_at else datetime.utcnow()
+                ended_at = datetime.fromisoformat(ended_at) if ended_at else None
+            except ValueError as e:
+                logger.warning(f"Error parsing dates for AFK entry {old_id}: {e}")
+                continue
+            
+            if not start_date or not end_date:
+                logger.warning(f"Skipping AFK entry {old_id} due to missing dates")
+                continue
+            
+            afk_entry = AFKEntry(
+                user_id=new_user_id,
+                start_date=start_date,
+                end_date=end_date,
+                reason=reason,
+                is_active=bool(is_active),
+                created_at=created_at,
+                ended_at=ended_at
+            )
+            pg_session.add(afk_entry)
+        
+        pg_session.commit()
+        logger.info(f"Migrated {len(afk_entries)} AFK entries")
+        
         # Close connections
         sqlite_conn.close()
         pg_session.close()
         
-        logger.info("Database inspection completed!")
+        logger.info("Migration completed successfully!")
         
     except Exception as e:
         logger.error(f"Error during migration: {e}")
