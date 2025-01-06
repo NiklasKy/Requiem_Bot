@@ -51,40 +51,47 @@ class RequiemBot(commands.Bot):
         intents.members = True
         intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
+        self._first_ready = True
 
     async def setup_hook(self):
         """Set up the bot."""
-        logging.info(f"Bot is logged in as {self.user}")
-        try:
-            logging.info("Starting to sync commands...")
-            guild = discord.Object(id=GUILD_ID)
-            
-            # First, clear all commands everywhere
-            self.tree.clear_commands(guild=None)
-            await self.tree.sync()  # Sync to clear global commands
-            
-            # Then clear guild-specific commands
-            self.tree.clear_commands(guild=guild)
-            await self.tree.sync(guild=guild)  # Sync to clear guild commands
-            
-            # Copy global commands to guild
-            self.tree.copy_global_to(guild=guild)
-            
-            # Final sync to add all commands
-            synced = await self.tree.sync(guild=guild)
-            
-            logging.info(f"Successfully synced {len(synced)} command(s) to guild {GUILD_ID}")
-            for command in synced:
-                logging.info(f"Synced command: {command.name}")
-                
-        except Exception as e:
-            logging.error(f"Error syncing commands: {e}")
-            raise
+        logging.info(f"Bot setup starting...")
 
     async def on_ready(self):
         """Called when the bot is ready."""
         logging.info(f"Logged in as {self.user} (ID: {self.user.id})")
         logging.info(f"Connected to guild ID: {GUILD_ID}")
+        
+        # Only sync commands on first ready
+        if self._first_ready:
+            try:
+                logging.info("Starting to sync commands...")
+                guild = discord.Object(id=GUILD_ID)
+                
+                # First, clear all commands everywhere
+                self.tree.clear_commands(guild=None)
+                await self.tree.sync()  # Sync to clear global commands
+                
+                # Then clear guild-specific commands
+                self.tree.clear_commands(guild=guild)
+                await self.tree.sync(guild=guild)  # Sync to clear guild commands
+                
+                # Copy global commands to guild
+                self.tree.copy_global_to(guild=guild)
+                
+                # Final sync to add all commands
+                synced = await self.tree.sync(guild=guild)
+                
+                logging.info(f"Successfully synced {len(synced)} command(s) to guild {GUILD_ID}")
+                for command in synced:
+                    logging.info(f"Synced command: {command.name}")
+                    
+            except Exception as e:
+                logging.error(f"Error syncing commands: {e}")
+                raise
+            
+            self._first_ready = False
+            
         logging.info("------")
 
 # Create bot instance
