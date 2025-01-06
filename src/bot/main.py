@@ -51,47 +51,90 @@ class RequiemBot(commands.Bot):
         intents.members = True
         intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
-        self._first_ready = True
 
     async def setup_hook(self):
         """Set up the bot."""
-        logging.info(f"Bot setup starting...")
+        logging.info(f"Bot is logged in as {self.user}")
+        try:
+            logging.info("Starting to sync commands...")
+            
+            # Get the guild
+            guild = discord.Object(id=GUILD_ID)
+            logging.info(f"Target guild ID: {GUILD_ID}")
+            
+            # Register all commands
+            self.tree.clear_commands(guild=None)
+            self.tree.clear_commands(guild=guild)
+            
+            # Add commands manually
+            @self.tree.command(name="afk", description="Set your AFK status", guild=guild)
+            @app_commands.describe(
+                start_date="Start date (DDMM, DD/MM or DD.MM)",
+                start_time="Start time (HHMM or HH:MM)",
+                end_date="End date (DDMM, DD/MM or DD.MM)",
+                end_time="End time (HHMM or HH:MM)",
+                reason="Reason for being AFK"
+            )
+            async def afk_command(interaction, start_date: str, start_time: str, end_date: str, end_time: str, reason: str):
+                await afk(interaction, start_date, start_time, end_date, end_time, reason)
+
+            @self.tree.command(name="afkquick", description="Quickly set AFK status until end of day", guild=guild)
+            @app_commands.describe(
+                reason="Reason for being AFK",
+                days="Optional: Number of days to be AFK (default: until end of today)"
+            )
+            async def afkquick_command(interaction, reason: str, days: int = None):
+                await afkquick(interaction, reason, days)
+
+            @self.tree.command(name="afkreturn", description="Return from AFK status", guild=guild)
+            async def afkreturn_command(interaction):
+                await afkreturn(interaction)
+
+            @self.tree.command(name="afklist", description="List all AFK users", guild=guild)
+            async def afklist_command(interaction):
+                await afklist(interaction)
+
+            @self.tree.command(name="afkmy", description="Show your personal AFK entries", guild=guild)
+            async def afkmy_command(interaction):
+                await afkmy(interaction)
+
+            @self.tree.command(name="afkhistory", description="Show AFK history for a user", guild=guild)
+            @app_commands.describe(user="The user to check history for")
+            async def afkhistory_command(interaction, user: discord.Member):
+                await afkhistory(interaction, user)
+
+            @self.tree.command(name="afkdelete", description="Delete AFK entries (Admin only)", guild=guild)
+            @app_commands.describe(
+                user="The user whose AFK entries you want to delete",
+                all_entries="Delete all entries for this user? If false, only deletes active entries"
+            )
+            async def afkdelete_command(interaction, user: discord.Member, all_entries: bool = False):
+                await afkdelete(interaction, user, all_entries)
+
+            @self.tree.command(name="afkstats", description="Show AFK statistics", guild=guild)
+            async def afkstats_command(interaction):
+                await afkstats(interaction)
+
+            @self.tree.command(name="getmembers", description="List all members with a specific role", guild=guild)
+            @app_commands.describe(role="The role to check members for")
+            async def getmembers_command(interaction, role: discord.Role):
+                await getmembers(interaction, role)
+
+            # Sync the commands
+            synced = await self.tree.sync(guild=guild)
+            
+            logging.info(f"Successfully synced {len(synced)} command(s) to guild {GUILD_ID}")
+            for command in synced:
+                logging.info(f"Synced command: {command.name}")
+                
+        except Exception as e:
+            logging.error(f"Error syncing commands: {e}")
+            raise
 
     async def on_ready(self):
         """Called when the bot is ready."""
         logging.info(f"Logged in as {self.user} (ID: {self.user.id})")
         logging.info(f"Connected to guild ID: {GUILD_ID}")
-        
-        # Only sync commands on first ready
-        if self._first_ready:
-            try:
-                logging.info("Starting to sync commands...")
-                guild = discord.Object(id=GUILD_ID)
-                
-                # First, clear all commands everywhere
-                self.tree.clear_commands(guild=None)
-                await self.tree.sync()  # Sync to clear global commands
-                
-                # Then clear guild-specific commands
-                self.tree.clear_commands(guild=guild)
-                await self.tree.sync(guild=guild)  # Sync to clear guild commands
-                
-                # Copy global commands to guild
-                self.tree.copy_global_to(guild=guild)
-                
-                # Final sync to add all commands
-                synced = await self.tree.sync(guild=guild)
-                
-                logging.info(f"Successfully synced {len(synced)} command(s) to guild {GUILD_ID}")
-                for command in synced:
-                    logging.info(f"Synced command: {command.name}")
-                    
-            except Exception as e:
-                logging.error(f"Error syncing commands: {e}")
-                raise
-            
-            self._first_ready = False
-            
         logging.info("------")
 
 # Create bot instance
