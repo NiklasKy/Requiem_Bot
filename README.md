@@ -1,74 +1,138 @@
 # Requiem Bot
 
-A Discord bot for managing AFK status and clan members.
+Discord bot for managing AFK status and other clan-related functionalities.
 
 ## Features
 
-- AFK status management
-- Clan member management
-- REST API for external access
-- Automatic database backups
-- Automatic container recovery
+- AFK Management
+- Clan Member Management
+- Discord Role Integration
+- REST API for external integrations
+- Automated Database Backups
 
-## Installation
+## Prerequisites
 
-1. Clone repository
-2. Create `.env` file (see `.env.example`)
-3. Install Docker and Docker Compose
-4. Start with:
-```bash
-docker-compose up -d
+- Docker and Docker Compose
+- Windows Server (for production setup)
+- Domain name (for HTTPS setup)
+
+## Quick Start
+
+1. Clone the repository
+2. Copy `.env.example` to `.env` and fill in your values
+3. Run `docker compose up -d`
+
+## Environment Variables
+
+See `.env.example` for all required environment variables.
+
+## API Documentation
+
+The API is available at `http://your-server:3000` (or `https://` if SSL is configured)
+
+Available endpoints:
+- `/api/discord/role/{role_id}/members` - Get all members of a Discord role
+- `/api/afk` - Get all active AFK entries
+- `/api/afk/{discord_id}` - Get AFK entries for a specific user
+- `/api/clan/{clan_role_id}/members` - Get all members of a specific clan
+
+## HTTPS Setup (Production)
+
+### Prerequisites
+- A domain pointing to your server
+- Windows Server with administrator access
+- Docker and Docker Compose installed
+
+### Installation Steps
+
+1. **Install Win-ACME**
+   ```powershell
+   # Install Chocolatey (if not already installed)
+   Set-ExecutionPolicy Bypass -Scope Process -Force
+   [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+   iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+   # Install Win-ACME
+   choco install win-acme
+   ```
+
+2. **Generate SSL Certificate**
+   ```powershell
+   # Stop API container temporarily
+   docker compose stop api
+
+   # Generate certificate (replace with your domain)
+   # Open Command Prompt as Administrator and run:
+   wacs --target manual --host api.yourdomain.com --installation certificate --store certificatestore
+   ```
+
+3. **Export Certificates**
+   ```powershell
+   # Create SSL directory
+   mkdir ssl
+
+   # Export certificates using Win-ACME
+   wacs --export --certificatestore --file ssl\fullchain.pem --pemkey ssl\privkey.pem
+   ```
+
+4. **Update Environment Variables**
+   ```env
+   # In your .env file
+   API_PORT=443
+   SSL_KEYFILE=ssl/privkey.pem
+   SSL_CERTFILE=ssl/fullchain.pem
+   ```
+
+5. **Configure Firewall**
+   ```powershell
+   # Allow HTTPS traffic
+   New-NetFirewallRule -DisplayName "HTTPS-Requiem-API" -Direction Inbound -LocalPort 443 -Protocol TCP -Action Allow
+   
+   # Allow HTTP traffic for certificate validation
+   New-NetFirewallRule -DisplayName "HTTP-ACME-Challenge" -Direction Inbound -LocalPort 80 -Protocol TCP -Action Allow
+   ```
+
+6. **Restart Services**
+   ```powershell
+   docker compose down
+   docker compose up -d
+   ```
+
+### Certificate Auto-Renewal
+
+1. The `scripts/renew-cert.ps1` script handles certificate renewal:
+   ```powershell
+   # Stop API container
+   docker compose stop api
+
+   # Renew certificate
+   wacs --renew
+
+   # Export renewed certificates
+   wacs --export --certificatestore --file ssl\fullchain.pem --pemkey ssl\privkey.pem
+
+   # Restart API container
+   docker compose start api
+   ```
+
+2. **Set up Automatic Renewal**
+   - Win-ACME automatically creates a scheduled task for renewal
+   - To add certificate export after renewal:
+     - Open Windows Task Scheduler
+     - Create new task:
+       - Name: "Export SSL Certificates"
+       - Trigger: After Win-ACME renewal task
+       - Action: Run PowerShell script
+       - Command: `powershell.exe -ExecutionPolicy Bypass -File "C:\path\to\scripts\renew-cert.ps1"`
+
+### Verification
+
+After setup, your API will be available at:
 ```
-
-## Automatic Recovery Setup
-
-The bot is configured to automatically restart after system crashes or reboots.
-
-### Docker Configuration
-The `docker-compose.yml` includes:
-- Automatic container restarts (`restart: unless-stopped`)
-- Health checks for the database
-- Log rotation (10MB per file, max 3 files)
-- Automatic database backups on shutdown
-
-### Windows Setup
-1. Ensure Docker Desktop is installed
-2. Configure Docker Desktop to start automatically:
-   - Open Docker Desktop
-   - Go to Settings (⚙️)
-   - General
-   - Check "Start Docker Desktop when you log in"
-   - Apply & Restart
-
-The containers will:
-- Start automatically with Docker
-- Restart after crashes
-- Ensure proper shutdown with database backups
-- Maintain log rotation
-
-### Verifying the Setup
-1. Check container status:
-```bash
-docker-compose ps
-```
-
-2. View logs:
-```bash
-docker-compose logs
-```
-
-3. Test automatic recovery:
-```bash
-# Stop all containers
-docker-compose down
-
-# Start them again
-docker-compose up -d
+https://api.yourdomain.com/api/discord/role/{role_id}/members
 ```
 
 ## Database Backups
-
-The bot automatically creates backups of the PostgreSQL database:
 
 ### Automatic Backups
 - Created when the container shuts down
@@ -77,31 +141,18 @@ The bot automatically creates backups of the PostgreSQL database:
 - Retention: 7 days
 
 ### Create Manual Backup
-```bash
-docker-compose exec db /scripts/backup_db.sh
+```powershell
+docker compose exec db /scripts/backup_db.sh
 ```
 
 ### Restore Backup
-```bash
-# Unzip backup
-gunzip db_backup_YYYYMMDD_HHMMSS.sql.gz
+```powershell
+# Restore from .sql.gz backup
+docker compose exec db bash -c "gunzip -c /backups/db_backup_YYYYMMDD_HHMMSS.sql.gz | psql -U postgres postgres"
 
-# Import into database
-docker-compose exec -T db psql -U ${DB_USER} ${DB_NAME} < db_backup_YYYYMMDD_HHMMSS.sql
+# Or restore from .dump file
+docker compose exec db pg_restore -U postgres -d postgres -c -v /backups/backup.dump
 ```
-
-### Backup Configuration
-The backup settings can be adjusted in the following files:
-- `docker-compose.yml`: Container configuration
-- `scripts/backup_db.sh`: Backup script
-
-## API Endpoints
-
-- `GET /api/afk`: List all active AFK entries
-- `GET /api/afk/{discord_id}`: Get AFK entries for a specific user
-- `POST /api/afk`: Create new AFK entry
-- `GET /api/clan/{clan_role_id}/members`: List all members of a clan
-- `GET /api/discord/role/{role_id}/members`: List all Discord members of a role
 
 ## Discord Commands
 
@@ -111,12 +162,14 @@ The backup settings can be adjusted in the following files:
 - `/afkreturn`: End AFK status
 - `/afklist`: Show all active AFK users
 - `/afkmy`: Show your personal AFK entries
-- `/afkhistory <user>`: Show AFK history for a user (admin only)
+- `/afkhistory <user>`: Show AFK history for a user
 - `/afkdelete <user> [all_entries]`: Delete AFK entries (admin only)
-- `/afkstats`: Show AFK statistics (admin only)
+- `/afkstats`: Show AFK statistics
+- `/afkremove <afk_id>`: Remove a future AFK entry
 
 ### Member Management
-- `/getmembers <role>`: List members with a specific role (admin only)
+- `/getmembers <role>`: List members with a specific role
+- `/checksignups <role> <event_id>`: Compare role members with Raid-Helper signups (admin only)
 
 ## Development
 
@@ -140,17 +193,13 @@ pip install -r requirements.txt
 
 3. Start development server:
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ### Database Migration
-To migrate data from a SQLite database to PostgreSQL:
+To migrate data from SQLite to PostgreSQL:
 ```bash
-# Copy SQLite DB to container
-docker cp path/to/sqlite.db requiem_bot-api-1:/app/data/
-
-# Run migration
-docker-compose exec api python -m src.database.migrate /app/data/sqlite.db
+python migrate_db.py
 ```
 
 ### Command Parameters

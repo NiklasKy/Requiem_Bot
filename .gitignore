@@ -61,3 +61,7 @@ db_backup_*
 # Operating System
 .DS_Store     # macOS
 Thumbs.db     # Windows 
+
+# SSL certificates
+/ssl/
+*.pem 
