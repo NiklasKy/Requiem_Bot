@@ -39,7 +39,7 @@ Available endpoints:
 ## HTTPS Setup (Production)
 
 ### Prerequisites
-- A domain pointing to your server
+- A domain pointing to your server (e.g., requiem-api.yourdomain.com)
 - Windows Server with administrator access
 - Docker and Docker Compose installed
 
@@ -56,40 +56,42 @@ Available endpoints:
    choco install win-acme
    ```
 
-2. **Generate SSL Certificate**
-   ```powershell
-   # Stop API container temporarily
-   docker compose stop api
-
-   # Generate certificate (replace with your domain)
-   # Open Command Prompt as Administrator and run:
-   wacs --target manual --host api.yourdomain.com --installation certificate --store certificatestore
-   ```
-
-3. **Export Certificates**
-   ```powershell
-   # Create SSL directory
-   mkdir ssl
-
-   # Export certificates using Win-ACME
-   wacs --export --certificatestore --file ssl\fullchain.pem --pemkey ssl\privkey.pem
-   ```
-
-4. **Update Environment Variables**
-   ```env
-   # In your .env file
-   API_PORT=443
-   SSL_KEYFILE=ssl/privkey.pem
-   SSL_CERTFILE=ssl/fullchain.pem
-   ```
-
-5. **Configure Firewall**
+2. **Configure Firewall**
    ```powershell
    # Allow HTTPS traffic
    New-NetFirewallRule -DisplayName "HTTPS-Requiem-API" -Direction Inbound -LocalPort 443 -Protocol TCP -Action Allow
    
    # Allow HTTP traffic for certificate validation
    New-NetFirewallRule -DisplayName "HTTP-ACME-Challenge" -Direction Inbound -LocalPort 80 -Protocol TCP -Action Allow
+   ```
+
+3. **Create SSL Directory**
+   ```powershell
+   # Create directory for certificates
+   mkdir ssl
+   ```
+
+4. **Generate and Export Certificate**
+   ```powershell
+   # Stop API container
+   docker compose stop api
+
+   # Generate certificate (replace with your domain)
+   wacs --source manual --host requiem-api.yourdomain.com --store pemfiles --pemfilespath ssl
+   ```
+
+   This will create several files in the ssl directory:
+   - `requiem-api.yourdomain.com-key.pem` (Private key)
+   - `requiem-api.yourdomain.com-chain.pem` (Certificate chain)
+   - `requiem-api.yourdomain.com-chain-only.pem` (Intermediate certificates)
+   - `requiem-api.yourdomain.com-crt.pem` (Server certificate)
+
+5. **Update Environment Variables**
+   ```env
+   # In your .env file
+   API_PORT=443
+   SSL_KEYFILE=ssl/requiem-api.yourdomain.com-key.pem
+   SSL_CERTFILE=ssl/requiem-api.yourdomain.com-chain.pem
    ```
 
 6. **Restart Services**
@@ -100,36 +102,93 @@ Available endpoints:
 
 ### Certificate Auto-Renewal
 
-1. The `scripts/renew-cert.ps1` script handles certificate renewal:
-   ```powershell
-   # Stop API container
-   docker compose stop api
+Win-ACME automatically creates a scheduled task for certificate renewal. The certificates will be renewed automatically when they are about to expire (typically around 30 days before expiration).
 
-   # Renew certificate
-   wacs --renew
+The renewal script `scripts/renew-cert.ps1` handles the certificate re-export after automatic renewal:
+```powershell
+# Stop API container
+docker compose stop api
 
-   # Export renewed certificates
-   wacs --export --certificatestore --file ssl\fullchain.pem --pemkey ssl\privkey.pem
+# Re-export certificates with correct names
+wacs --source manual --host requiem-api.yourdomain.com --store pemfiles --pemfilespath ssl
 
-   # Restart API container
-   docker compose start api
+# Restart API container
+docker compose start api
+```
+
+To set up automatic re-export after renewal:
+1. Open Task Scheduler:
+   - Press Windows + R
+   - Enter `taskschd.msc`
+   - Click OK
+
+2. Create new task:
+   - Right-click "Task Scheduler Library"
+   - Select "Create Task..."
+
+3. General Tab:
+   - Name: "Requiem Bot - Export SSL Certificates"
+   - Description: "Re-exports SSL certificates after Win-ACME renewal"
+   - Run with highest privileges: ✓
+   - "Run whether user is logged on or not": ✓
+   - Configure for: Windows Server 2022
+
+4. Triggers Tab:
+   - Click "New..."
+   - Begin the task: "On an event"
+   - Log: "Microsoft-Windows-TaskScheduler/Operational"
+   - Source: "Task Scheduler"
+   - Event ID: 102
+   - Custom: ✓
+   - XML Filter:
+     ```xml
+     <QueryList>
+       <Query Id="0" Path="Microsoft-Windows-TaskScheduler/Operational">
+         <Select Path="Microsoft-Windows-TaskScheduler/Operational">
+           *[EventData[Data[@Name='TaskName']='\win-acme renew (acme-v02.api.letsencrypt.org)']]
+         </Select>
+       </Query>
+     </QueryList>
+     ```
+
+5. Actions Tab:
+   - Click "New..."
+   - Action: "Start a program"
+   - Program/script: `powershell.exe`
+   - Add arguments: `-ExecutionPolicy Bypass -File "C:\#Requiem\Requiem_Bot\scripts\renew-cert.ps1"`
+   - Start in: `C:\#Requiem\Requiem_Bot`
+
+6. Conditions Tab:
+   - Uncheck "Start the task only if the computer is on AC power"
+   - Leave other settings at default
+
+7. Settings Tab:
+   - "Allow task to be run on demand": ✓
+   - "Run task as soon as possible after a scheduled start is missed": ✓
+   - "If the task fails, restart every": 1 minute
+   - "Attempt to restart up to": 3 times
+   - "Stop the task if it runs longer than": 1 hour
+
+### Security Notes
+
+1. SSL certificates and private keys are sensitive data. They are automatically added to `.gitignore`:
+   ```gitignore
+   # SSL certificates
+   /ssl/
+   *.pem
    ```
 
-2. **Set up Automatic Renewal**
-   - Win-ACME automatically creates a scheduled task for renewal
-   - To add certificate export after renewal:
-     - Open Windows Task Scheduler
-     - Create new task:
-       - Name: "Export SSL Certificates"
-       - Trigger: After Win-ACME renewal task
-       - Action: Run PowerShell script
-       - Command: `powershell.exe -ExecutionPolicy Bypass -File "C:\path\to\scripts\renew-cert.ps1"`
+2. Make sure to:
+   - Keep your private keys secure
+   - Don't commit SSL certificates to version control
+   - Regularly backup your certificates
+   - Monitor certificate expiration dates
 
 ### Verification
 
 After setup, your API will be available at:
 ```
-https://api.yourdomain.com/api/discord/role/{role_id}/members
+https://requiem-api.yourdomain.com/api/discord/role/{role_id}/members
 ```
 
 ## Database Backups

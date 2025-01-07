@@ -1,8 +1,8 @@
 # Stop API container
 docker compose stop api
 
-# Export certificates using Win-ACME
-wacs --export --certificatestore --file ..\ssl\fullchain.pem --pemkey ..\ssl\privkey.pem
+# Re-export certificates with correct names
+wacs --source manual --host requiem-api.niklasky.com --store pemfiles --pemfilespath ssl
 
 # Restart API container
 docker compose start api 
