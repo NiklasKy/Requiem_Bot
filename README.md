@@ -199,19 +199,40 @@ https://requiem-api.yourdomain.com/api/discord/role/{role_id}/members
 - Format: `db_backup_YYYYMMDD_HHMMSS.sql.gz`
 - Retention: 7 days
 
-### Create Manual Backup
+### Manual Backup Methods
+
+#### Create Compressed SQL Backup
 ```powershell
 docker compose exec db /scripts/backup_db.sh
 ```
 
-### Restore Backup
+#### Create Dump File Backup
 ```powershell
-# Restore from .sql.gz backup
-docker compose exec db bash -c "gunzip -c /backups/db_backup_YYYYMMDD_HHMMSS.sql.gz | psql -U postgres postgres"
-
-# Or restore from .dump file
-docker compose exec db pg_restore -U postgres -d postgres -c -v /backups/backup.dump
+# Create a dump file backup
+docker compose exec db pg_dump -U postgres -Fc postgres > backups/backup.dump
 ```
+
+### Restore Methods
+
+#### Restore from SQL.GZ Backup
+```powershell
+# Unpack and restore .sql.gz backup
+docker compose exec db bash -c "gunzip -c /backups/db_backup_YYYYMMDD_HHMMSS.sql.gz | psql -U postgres postgres"
+```
+
+#### Restore from Dump File
+```powershell
+# First, drop and recreate the database
+docker compose exec db psql -U postgres -c "DROP DATABASE postgres WITH (FORCE);" -c "CREATE DATABASE postgres;"
+
+# Then restore from dump file
+docker compose exec db pg_restore -U postgres -v -d postgres /backups/backup.dump
+```
+
+**Note**: When restoring from a dump file, make sure to:
+1. Stop any applications accessing the database
+2. Drop and recreate the database before restoring
+3. Restart your applications after the restore is complete
 
 ## Discord Commands
 
