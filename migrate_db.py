@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
@@ -61,6 +61,16 @@ def migrate_data():
         for user_data in unique_users:
             old_user_id, display_name, clan_role_id = user_data
             
+            # Check if user already exists
+            existing_user = pg_session.execute(
+                select(User).where(User.discord_id == str(old_user_id))
+            ).scalar_one_or_none()
+            
+            if existing_user:
+                logger.info(f"User with discord_id {old_user_id} already exists, skipping creation")
+                user_id_mapping[old_user_id] = existing_user.id
+                continue
+            
             # Create new user
             user = User(
                 discord_id=str(old_user_id),  # Use old user_id as discord_id
@@ -73,7 +83,7 @@ def migrate_data():
             user_id_mapping[old_user_id] = user.id
         
         pg_session.commit()
-        logger.info(f"Created {len(unique_users)} users")
+        logger.info(f"Created {len(user_id_mapping)} users")
         
         # Migrate AFK entries
         logger.info("Migrating AFK entries...")
@@ -84,12 +94,16 @@ def migrate_data():
         """)
         afk_entries = sqlite_cursor.fetchall()
         
+        migrated_entries = 0
         for afk_data in afk_entries:
             (old_id, old_user_id, start_date, end_date, reason, 
              is_active, created_at, ended_at) = afk_data
             
             # Map old user_id to new user_id
-            new_user_id = user_id_mapping[old_user_id]
+            new_user_id = user_id_mapping.get(old_user_id)
+            if not new_user_id:
+                logger.warning(f"Skipping AFK entry {old_id}: User mapping not found for user_id {old_user_id}")
+                continue
             
             # Convert string dates to datetime objects
             try:
@@ -115,9 +129,10 @@ def migrate_data():
                 ended_at=ended_at
             )
             pg_session.add(afk_entry)
+            migrated_entries += 1
         
         pg_session.commit()
-        logger.info(f"Migrated {len(afk_entries)} AFK entries")
+        logger.info(f"Migrated {migrated_entries} AFK entries")
         
         # Close connections
         sqlite_conn.close()
