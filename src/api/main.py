@@ -1,23 +1,36 @@
 """FastAPI server for the Requiem Bot API."""
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 import discord
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 from src.database.connection import get_db_session
 from src.database.operations import (get_active_afk, get_user_afk_history,
-                                   get_or_create_user, set_afk, get_clan_members)
+                                   get_or_create_user, set_afk, get_clan_members,
+                                   get_clan_membership_history,
+                                   get_clan_membership_changes)
 
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = int(os.getenv("DISCORD_GUILD_ID", "0"))
+API_SECRET_KEY = os.getenv("API_SECRET_KEY")
+
+# Clan configuration
+CLAN1_ROLE_ID = int(os.getenv("CLAN1_ROLE_ID", "0"))
+CLAN2_ROLE_ID = int(os.getenv("CLAN2_ROLE_ID", "0"))
+CLAN1_NAME = os.getenv("CLAN1_NAME", "Clan 1")
+CLAN2_NAME = os.getenv("CLAN2_NAME", "Clan 2")
+
+# Create security scheme
+security = HTTPBearer()
 
 # Create Discord client
 class DiscordBot(discord.Client):
@@ -90,6 +103,17 @@ class AFKResponse(BaseModel):
     is_active: bool
     created_at: datetime
     ended_at: Optional[datetime] = None
+
+class ClanMembershipResponse(BaseModel):
+    """Response model for clan membership data."""
+    discord_id: str
+    username: str
+    display_name: Optional[str]
+    clan_role_id: str
+    clan_name: str
+    joined_at: datetime
+    left_at: Optional[datetime]
+    is_active: bool
 
 @app.get("/")
 async def root():
@@ -193,3 +217,103 @@ async def get_discord_role_members(role_id: str):
             status_code=500,
             detail=f"Error getting role members: {str(e)}"
         ) 
+
+@app.get("/api/clan/memberships", response_model=List[ClanMembershipResponse])
+async def get_memberships(
+    clan_role_id: Optional[str] = None,
+    include_inactive: bool = False,
+    days: Optional[int] = None,
+    credentials: HTTPAuthorizationCredentials = Security(security)
+):
+    """Get clan membership data.
+    
+    Args:
+        clan_role_id: Optional clan role ID to filter by
+        include_inactive: Whether to include inactive memberships
+        days: Optional number of days to look back
+        credentials: Bearer token for authentication
+    """
+    if credentials.credentials != API_SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    try:
+        with get_db_session() as db:
+            if days:
+                end_date = datetime.utcnow()
+                start_date = end_date - timedelta(days=days)
+                memberships = get_clan_membership_changes(
+                    db,
+                    clan_role_id=clan_role_id,
+                    start_date=start_date,
+                    end_date=end_date
+                )
+            else:
+                memberships = get_clan_membership_history(
+                    db,
+                    clan_role_id=clan_role_id,
+                    include_inactive=include_inactive
+                )
+            
+            # Convert to response model
+            response = []
+            for user, membership in memberships:
+                clan_name = (
+                    CLAN1_NAME if membership.clan_role_id == str(CLAN1_ROLE_ID)
+                    else CLAN2_NAME if membership.clan_role_id == str(CLAN2_ROLE_ID)
+                    else membership.clan_role_id
+                )
+                response.append(ClanMembershipResponse(
+                    discord_id=user.discord_id,
+                    username=user.username,
+                    display_name=user.display_name,
+                    clan_role_id=membership.clan_role_id,
+                    clan_name=clan_name,
+                    joined_at=membership.joined_at,
+                    left_at=membership.left_at,
+                    is_active=membership.is_active
+                ))
+            return response
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting clan memberships: {str(e)}"
+        )
+
+@app.get("/api/clan/{clan_role_id}/current", response_model=List[ClanMembershipResponse])
+async def get_current_members(
+    clan_role_id: str,
+    credentials: HTTPAuthorizationCredentials = Security(security)
+):
+    """Get current members of a clan.
+    
+    Args:
+        clan_role_id: The clan role ID to get members for
+        credentials: Bearer token for authentication
+    """
+    if credentials.credentials != API_SECRET_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    try:
+        db = next(get_db())
+        memberships = get_clan_membership_history(
+            db,
+            clan_role_id=clan_role_id,
+            include_inactive=False
+        )
+        
+        return [
+            ClanMembershipResponse(
+                discord_id=user.discord_id,
+                username=user.username,
+                display_name=user.display_name,
+                clan_role_id=membership.clan_role_id,
+                joined_at=membership.joined_at,
+                left_at=membership.left_at,
+                is_active=membership.is_active
+            )
+            for user, membership in memberships
+        ]
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) 

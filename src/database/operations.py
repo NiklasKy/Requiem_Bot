@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import and_, or_, func
 from sqlalchemy.orm import Session
 
-from src.database.models import AFKEntry, RaidSignup, User
+from src.database.models import AFKEntry, RaidSignup, User, ClanMembership
 
 def get_or_create_user(
     db: Session,
@@ -445,3 +445,164 @@ def get_clan_active_and_future_afk(
         query = query.filter(User.clan_role_id == clan_role_id)
     
     return query.order_by(AFKEntry.start_date.asc()).all() 
+
+def sync_clan_memberships(
+    db: Session,
+    clan_role_id: str,
+    current_member_ids: list[str]
+) -> tuple[list[str], list[str]]:
+    """Synchronize clan memberships with current Discord role members.
+    
+    Args:
+        db: Database session
+        clan_role_id: Discord role ID of the clan
+        current_member_ids: List of Discord user IDs currently in the role
+        
+    Returns:
+        Tuple of (joined_members, left_members) Discord IDs
+    """
+    current_time = datetime.utcnow()
+    joined_members = []
+    left_members = []
+    
+    # Get all active memberships for this clan
+    active_memberships = (
+        db.query(ClanMembership)
+        .join(User)
+        .filter(
+            ClanMembership.clan_role_id == clan_role_id,
+            ClanMembership.is_active == True
+        )
+        .all()
+    )
+    
+    # Create a map of active memberships by discord_id
+    active_members = {
+        m.user.discord_id: m for m in active_memberships
+    }
+    
+    # Process current members
+    for discord_id in current_member_ids:
+        if discord_id not in active_members:
+            # New member joined
+            user = get_or_create_user(db, discord_id, str(discord_id))
+            membership = ClanMembership(
+                user_id=user.id,
+                clan_role_id=clan_role_id,
+                joined_at=current_time,
+                is_active=True
+            )
+            db.add(membership)
+            joined_members.append(discord_id)
+    
+    # Process members who left
+    for discord_id, membership in active_members.items():
+        if discord_id not in current_member_ids:
+            # Member left
+            membership.is_active = False
+            membership.left_at = current_time
+            left_members.append(discord_id)
+    
+    db.commit()
+    return joined_members, left_members
+
+def get_clan_membership_history(
+    db: Session,
+    discord_id: Optional[str] = None,
+    clan_role_id: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    include_inactive: bool = False
+) -> List[Tuple[User, ClanMembership]]:
+    """Get clan membership history.
+    
+    Args:
+        db: Database session
+        discord_id: Optional Discord ID to filter by specific user
+        clan_role_id: Optional clan role ID to filter by specific clan
+        start_date: Optional start date to filter changes
+        end_date: Optional end date to filter changes
+        include_inactive: Whether to include inactive memberships
+        
+    Returns:
+        List of tuples containing (User, ClanMembership)
+    """
+    query = (
+        db.query(User, ClanMembership)
+        .join(ClanMembership, User.id == ClanMembership.user_id)
+    )
+    
+    # Apply filters
+    if discord_id:
+        query = query.filter(User.discord_id == discord_id)
+        
+    if clan_role_id:
+        query = query.filter(ClanMembership.clan_role_id == clan_role_id)
+        
+    if not include_inactive:
+        query = query.filter(ClanMembership.is_active == True)
+        
+    if start_date:
+        query = query.filter(
+            or_(
+                ClanMembership.joined_at >= start_date,
+                and_(
+                    ClanMembership.left_at != None,
+                    ClanMembership.left_at >= start_date
+                )
+            )
+        )
+        
+    if end_date:
+        query = query.filter(ClanMembership.joined_at <= end_date)
+    
+    # Order by joined_at date, most recent first
+    query = query.order_by(ClanMembership.joined_at.desc())
+    
+    return query.all()
+
+def get_clan_membership_changes(
+    db: Session,
+    clan_role_id: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None
+) -> List[Tuple[User, ClanMembership]]:
+    """Get clan membership changes within a time period.
+    
+    Args:
+        db: Database session
+        clan_role_id: Optional clan role ID to filter by
+        start_date: Optional start date for the period
+        end_date: Optional end date for the period
+        
+    Returns:
+        List of (User, ClanMembership) tuples
+    """
+    query = (
+        db.query(User, ClanMembership)
+        .join(ClanMembership)
+    )
+    
+    if clan_role_id:
+        query = query.filter(ClanMembership.clan_role_id == clan_role_id)
+    
+    if start_date:
+        query = query.filter(
+            or_(
+                ClanMembership.joined_at >= start_date,
+                ClanMembership.left_at >= start_date
+            )
+        )
+    
+    if end_date:
+        query = query.filter(
+            or_(
+                ClanMembership.joined_at <= end_date,
+                and_(
+                    ClanMembership.left_at != None,
+                    ClanMembership.left_at <= end_date
+                )
+            )
+        )
+    
+    return query.order_by(ClanMembership.joined_at.desc()).all() 

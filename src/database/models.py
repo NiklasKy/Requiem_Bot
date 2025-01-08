@@ -22,6 +22,7 @@ class User(Base):
 
     # Relationships
     afk_entries = relationship("AFKEntry", back_populates="user")
+    clan_memberships = relationship("ClanMembership", back_populates="user")
 
 class AFKEntry(Base):
     """AFK status entry model."""
@@ -50,4 +51,18 @@ class RaidSignup(Base):
     status = Column(String(20), nullable=False)  # e.g., "confirmed", "tentative", "declined"
 
     # Relationships
-    user = relationship("User") 
+    user = relationship("User")
+
+class ClanMembership(Base):
+    """Clan membership tracking model."""
+    __tablename__ = "clan_memberships"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    clan_role_id = Column(String(20), nullable=False)
+    joined_at = Column(DateTime, nullable=False)
+    left_at = Column(DateTime)
+    is_active = Column(Boolean, default=True)
+
+    # Relationships
+    user = relationship("User", back_populates="clan_memberships") 

@@ -28,13 +28,123 @@ See `.env.example` for all required environment variables.
 
 ## API Documentation
 
-The API is available at `http://your-server:3000` (or `https://` if SSL is configured)
+The API is available at `http://localhost:8000` in development mode or `https://your-domain` in production mode.
 
-Available endpoints:
-- `/api/discord/role/{role_id}/members` - Get all members of a Discord role
-- `/api/afk` - Get all active AFK entries
-- `/api/afk/{discord_id}` - Get AFK entries for a specific user
-- `/api/clan/{clan_role_id}/members` - Get all members of a specific clan
+### Authentication
+
+All API endpoints require authentication using a Bearer token. Include the following header in your requests:
+```
+Authorization: Bearer your-api-secret-key
+```
+
+### Available Endpoints
+
+#### Clan Memberships
+```http
+GET /api/clan/memberships
+```
+Get all clan memberships with optional filtering.
+
+Query Parameters:
+- `clan_role_id` (optional): Filter by specific clan role ID
+- `include_inactive` (optional, default: false): Include former members
+- `days` (optional): Only show changes in the last X days
+
+Example Response:
+```json
+[
+    {
+        "discord_id": "148445299969490944",
+        "username": "username",
+        "display_name": "Display Name",
+        "clan_role_id": "791436960585220097",
+        "clan_name": "Clan Name",
+        "joined_at": "2025-01-08T18:27:06.796168",
+        "left_at": null,
+        "is_active": true
+    }
+]
+```
+
+#### Clan Members
+```http
+GET /api/clan/{clan_role_id}/members
+```
+Get current members of a specific clan.
+
+Example Response:
+```json
+[
+    {
+        "id": 1,
+        "discord_id": "148445299969490944",
+        "username": "username",
+        "display_name": "Display Name",
+        "clan_role_id": "791436960585220097",
+        "created_at": "2025-01-08T18:27:06.796168",
+        "updated_at": "2025-01-08T18:27:06.796168"
+    }
+]
+```
+
+#### AFK Status
+```http
+GET /api/afk
+```
+Get all active AFK entries.
+
+```http
+GET /api/afk/{discord_id}
+```
+Get AFK history for a specific user.
+
+Example Response:
+```json
+[
+    {
+        "id": 1,
+        "user_id": 1,
+        "start_date": "2025-01-08T18:27:06.796168",
+        "end_date": "2025-01-09T18:27:06.796168",
+        "reason": "Vacation",
+        "is_active": true,
+        "created_at": "2025-01-08T18:27:06.796168",
+        "ended_at": null
+    }
+]
+```
+
+#### Discord Role Members
+```http
+GET /api/discord/role/{role_id}/members
+```
+Get all members of a specific Discord role.
+
+Example Response:
+```json
+[
+    {
+        "discord_id": "148445299969490944",
+        "username": "username",
+        "display_name": "Display Name",
+        "roles": ["791436960585220097"]
+    }
+]
+```
+
+### Example Usage (PowerShell)
+
+```powershell
+$headers = @{ 
+    Authorization = "Bearer your-api-secret-key"
+}
+
+# Get all clan memberships
+Invoke-WebRequest -Uri "http://localhost:8000/api/clan/memberships" -Headers $headers -Method GET
+
+# Get memberships with filters
+Invoke-WebRequest -Uri "http://localhost:8000/api/clan/memberships?clan_role_id=791436960585220097&include_inactive=true&days=30" -Headers $headers -Method GET
+```
 
 ## HTTPS Setup (Production)
 
@@ -248,8 +358,70 @@ docker compose exec db pg_restore -U postgres -v -d postgres /backups/backup.dum
 - `/afkremove <afk_id>`: Remove a future AFK entry
 
 ### Member Management
-- `/getmembers <role>`: List members with a specific role
-- `/checksignups <role> <event_id>`: Compare role members with Raid-Helper signups (admin only)
+- `/getmembers <role>`: List all members with a specific role
+- `/checksignups <role> <event_id>`: Compare role members with Raid-Helper signups
+
+### Clan Management
+- `/clanhistory [user]`: Show clan membership history for a user (Admin/Officer only)
+  - `user`: Optional, defaults to yourself
+  - `include_inactive`: Optional, include past memberships (default: false)
+- `/clanchanges [clan] [days]`: Show recent clan membership changes (Admin/Officer only)
+  - `clan`: Optional, filter by specific clan
+  - `days`: Optional, number of days to look back (default: 7)
+
+## Clan Tracking Features
+
+The bot automatically tracks clan membership changes:
+- Monitors joins and leaves for configured clan roles
+- Records timestamps for all membership changes
+- Updates every minute
+- Accessible via API and Discord commands
+- Historical data available for analysis
+
+### API Endpoints for Clan Data
+- `/api/clan/{clan_role_id}/members` - Get current clan members
+- `/api/clan/{clan_role_id}/history` - Get clan membership history
+- `/api/clan/changes` - Get recent clan membership changes
+
+### API Endpoints
+
+#### Get Clan Memberships
+```http
+GET /api/clan/memberships
+```
+
+Query parameters:
+- `clan_role_id` (optional): Filter by specific clan
+- `include_inactive` (optional): Include past memberships
+- `days` (optional): Look back specific number of days
+
+Response:
+```json
+[
+  {
+    "discord_id": "string",
+    "username": "string",
+    "display_name": "string",
+    "clan_role_id": "string",
+    "joined_at": "datetime",
+    "left_at": "datetime",
+    "is_active": boolean
+  }
+]
+```
+
+#### Get Current Clan Members
+```http
+GET /api/clan/{clan_role_id}/current
+```
+
+Response: Same as above, but only includes active members.
+
+Authentication:
+All API endpoints require a Bearer token in the Authorization header:
+```http
+Authorization: Bearer your_api_secret_key
+```
 
 ## Development
 
@@ -301,3 +473,65 @@ python migrate_db.py
 
 #### /getmembers
 - `role`: The role to check members for 
+
+# API Documentation
+
+## Authentication
+All API endpoints require a Bearer token for authentication. Add the following header to your requests:
+```
+Authorization: Bearer your_api_secret_key
+```
+
+## Endpoints
+
+### Clan Memberships
+
+#### Get Clan Memberships
+```http
+GET /api/clan/memberships
+```
+
+Query Parameters:
+- `clan_role_id` (optional): Filter by specific clan role ID
+- `include_inactive` (optional): Include past memberships (default: false)
+- `days` (optional): Only show changes in the last X days
+
+Response:
+```json
+[
+  {
+    "discord_id": "123456789",
+    "username": "username",
+    "display_name": "display name",
+    "clan_role_id": "791436960585220097",
+    "clan_name": "Gruppe 9",
+    "joined_at": "2025-01-08T18:27:06.796168",
+    "left_at": null,
+    "is_active": true
+  }
+]
+```
+
+#### Get Current Clan Members
+```http
+GET /api/clan/{clan_role_id}/current
+```
+
+Path Parameters:
+- `clan_role_id`: The Discord role ID of the clan
+
+Response format is the same as above.
+
+### Environment Variables
+
+The following environment variables are used for clan configuration:
+
+```env
+# Clan Names
+CLAN1_NAME=name1          # Display name for first clan
+CLAN2_NAME=name2          # Display name for second clan
+CLAN1_ALIASES=alias1,alias2  # Comma-separated list of aliases for first clan
+CLAN2_ALIASES=alias3,alias4  # Comma-separated list of aliases for second clan
+```
+
+These variables are used to customize the clan names and their aliases in both the Discord bot commands and API responses. 

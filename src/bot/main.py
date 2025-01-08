@@ -5,10 +5,11 @@ from datetime import datetime, timedelta
 import time
 import asyncio
 import aiohttp
+from typing import Optional
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from sqlalchemy.orm import aliased
 from sqlalchemy import and_, or_
@@ -20,7 +21,8 @@ from src.database.operations import (delete_afk_entries, get_active_afk,
                                    get_or_create_user, get_user_afk_history,
                                    set_afk, track_raid_signup, update_afk_status,
                                    update_afk_active_status, get_user_active_and_future_afk,
-                                   get_clan_active_and_future_afk, remove_future_afk)
+                                   get_clan_active_and_future_afk, remove_future_afk,
+                                   sync_clan_memberships, get_clan_membership_history)
 from src.utils.time_parser import parse_date, parse_time, parse_datetime
 
 # Create logs directory if it doesn't exist
@@ -44,16 +46,25 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = int(os.getenv("DISCORD_GUILD_ID", "0"))
 ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
 OFFICER_ROLE_ID = int(os.getenv("OFFICER_ROLE_ID", "0"))
-CLAN1_ROLE_ID = int(os.getenv("CLAN1_ROLE_ID", "0"))  # Requiem Sun
-CLAN2_ROLE_ID = int(os.getenv("CLAN2_ROLE_ID", "0"))  # Requiem Moon
+CLAN1_ROLE_ID = int(os.getenv("CLAN1_ROLE_ID", "0"))  # Clan 1
+CLAN2_ROLE_ID = int(os.getenv("CLAN2_ROLE_ID", "0"))  # Clan 2
+
+# Clan Names and Aliases
+CLAN1_NAME = os.getenv("CLAN1_NAME", "Clan 1")
+CLAN2_NAME = os.getenv("CLAN2_NAME", "Clan 2")
+CLAN1_ALIASES = [alias.strip().lower() for alias in os.getenv("CLAN1_ALIASES", "clan1,c1").split(",")]
+CLAN2_ALIASES = [alias.strip().lower() for alias in os.getenv("CLAN2_ALIASES", "clan2,c2").split(",")]
 
 class RequiemBot(commands.Bot):
     """Main bot class."""
-    def __init__(self, command_prefix, intents):
-        super().__init__(command_prefix=command_prefix, intents=intents)
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.members = True
+        
+        super().__init__(command_prefix="!", intents=intents)
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
-        self.update_afk_task = None
 
     async def setup_hook(self):
         """Set up the bot."""
@@ -71,9 +82,9 @@ class RequiemBot(commands.Bot):
                 except Exception as e:
                     logging.error(f"Error updating AFK statuses: {e}")
 
-            # Start periodic AFK status update task
-            self.update_afk_task = self.loop.create_task(self.update_afk_status_periodically())
-            logging.info("Started periodic AFK status update task")
+            # Start background tasks
+            self.sync_clan_memberships.start()
+            self.update_afk_status.start()
 
             logging.info("Starting to sync commands...")
             
@@ -163,6 +174,40 @@ class RequiemBot(commands.Bot):
             async def rqping_command(interaction):
                 await interaction.response.send_message("Pong!")
 
+            @self.tree.command(
+                name="clanhistory",
+                description="Show clan membership history for a user (Admin/Officer only)",
+                guild=guild
+            )
+            @app_commands.describe(
+                user="The user to check history for (optional, defaults to yourself)",
+                include_inactive="Include past memberships (default: false)"
+            )
+            @has_required_role()
+            async def clanhistory_command(
+                interaction: discord.Interaction,
+                user: Optional[discord.Member] = None,
+                include_inactive: bool = False
+            ):
+                await clan_history(interaction, user, include_inactive)
+
+            @self.tree.command(
+                name="clanchanges",
+                description="Show recent clan membership changes (Admin/Officer only)",
+                guild=guild
+            )
+            @app_commands.describe(
+                clan="The clan to check changes for (optional, shows all clans if not specified)",
+                days="Number of days to look back (default: 7)"
+            )
+            @has_required_role()
+            async def clanchanges_command(
+                interaction: discord.Interaction,
+                clan: Optional[str] = None,
+                days: int = 7
+            ):
+                await clan_changes(interaction, clan, days)
+
             # Sync the commands
             synced = await self.tree.sync(guild=guild)
             
@@ -174,30 +219,95 @@ class RequiemBot(commands.Bot):
             logging.error(f"Error syncing commands: {e}")
             raise
 
+    @tasks.loop(minutes=1)
+    async def sync_clan_memberships(self):
+        """Sync clan memberships periodically."""
+        try:
+            if not self.is_ready():
+                logging.warning("Bot not ready yet, skipping clan sync")
+                return
+            
+            guild = self.get_guild(GUILD_ID)
+            if not guild:
+                logging.error(f"Could not fetch guild with ID {GUILD_ID}")
+                return
+            
+            with get_db_session() as db:
+                # Sync Clan 1
+                clan1_role = guild.get_role(CLAN1_ROLE_ID)
+                if clan1_role:
+                    current_members = []
+                    for member in clan1_role.members:
+                        current_members.append(str(member.id))
+                        # Update user data
+                        get_or_create_user(
+                            db,
+                            str(member.id),
+                            member.name,
+                            member.display_name,
+                            str(CLAN1_ROLE_ID)
+                        )
+                    
+                    joined, left = sync_clan_memberships(db, str(CLAN1_ROLE_ID), current_members)
+                    
+                    if joined:
+                        logging.info(f"New {CLAN1_NAME} members: {', '.join(joined)}")
+                    if left:
+                        logging.info(f"Left {CLAN1_NAME} members: {', '.join(left)}")
+                
+                # Sync Clan 2
+                clan2_role = guild.get_role(CLAN2_ROLE_ID)
+                if clan2_role:
+                    current_members = []
+                    for member in clan2_role.members:
+                        current_members.append(str(member.id))
+                        # Update user data
+                        get_or_create_user(
+                            db,
+                            str(member.id),
+                            member.name,
+                            member.display_name,
+                            str(CLAN2_ROLE_ID)
+                        )
+                    
+                    joined, left = sync_clan_memberships(db, str(CLAN2_ROLE_ID), current_members)
+                    
+                    if joined:
+                        logging.info(f"New {CLAN2_NAME} members: {', '.join(joined)}")
+                    if left:
+                        logging.info(f"Left {CLAN2_NAME} members: {', '.join(left)}")
+        
+        except Exception as e:
+            logging.error(f"Error syncing clan memberships: {e}")
+
+    @tasks.loop(minutes=1)
+    async def update_afk_status(self):
+        """Update AFK statuses every minute."""
+        try:
+            if not self.is_ready():
+                return
+                
+            with get_db_session() as db:
+                update_afk_active_status(db)
+                logging.debug("Updated AFK statuses")
+        except Exception as e:
+            logging.error(f"Error in periodic AFK status update: {e}")
+
+    @sync_clan_memberships.before_loop
+    async def before_sync_clan_memberships(self):
+        """Wait for the bot to be ready before starting the sync task."""
+        await self.wait_until_ready()
+
+    @update_afk_status.before_loop
+    async def before_update_afk_status(self):
+        """Wait for the bot to be ready before starting the update task."""
+        await self.wait_until_ready()
+
     async def on_ready(self):
         """Called when the bot is ready."""
         logging.info(f"Logged in as {self.user} (ID: {self.user.id})")
         logging.info(f"Connected to guild ID: {GUILD_ID}")
         logging.info("------")
-
-    async def update_afk_status_periodically(self):
-        """Update AFK statuses every minute."""
-        await self.wait_until_ready()  # Wait until bot is ready
-        while not self.is_closed():
-            try:
-                with get_db_session() as db:
-                    update_afk_active_status(db)
-                    logging.debug("Updated AFK statuses")
-            except Exception as e:
-                logging.error(f"Error in periodic AFK status update: {e}")
-            
-            await asyncio.sleep(60)  # Wait for 60 seconds
-
-    async def close(self):
-        """Clean up when bot is shutting down."""
-        if self.update_afk_task:
-            self.update_afk_task.cancel()
-        await super().close()
 
 def has_required_role():
     """Check if user has required role."""
@@ -349,8 +459,8 @@ async def afklist(interaction: discord.Interaction):
             if is_admin:
                 # Show all clans for admins
                 for clan_id, clan_name in [
-                    (CLAN1_ROLE_ID, "Requiem Sun"),
-                    (CLAN2_ROLE_ID, "Requiem Moon")
+                    (CLAN1_ROLE_ID, CLAN1_NAME),
+                    (CLAN2_ROLE_ID, CLAN2_NAME)
                 ]:
                     entries = get_clan_active_and_future_afk(db, str(clan_id))
                     if entries:
@@ -387,7 +497,7 @@ async def afklist(interaction: discord.Interaction):
                             )
             else:
                 # Show only user's clan
-                clan_name = "Requiem Sun" if user_clan_role_id == str(CLAN1_ROLE_ID) else "Requiem Moon"
+                clan_name = CLAN1_NAME if user_clan_role_id == str(CLAN1_ROLE_ID) else CLAN2_NAME
                 entries = get_clan_active_and_future_afk(db, user_clan_role_id)
                 
                 if entries:
@@ -874,6 +984,145 @@ async def checksignups(interaction: discord.Interaction, role: discord.Role, eve
         else:
             await interaction.followup.send(f"An error occurred: {str(e)}")
 
+async def clan_history(
+    interaction: discord.Interaction,
+    user: Optional[discord.Member] = None,
+    include_inactive: bool = False
+):
+    """Show clan membership history for a user."""
+    try:
+        with get_db_session() as db:
+            # If no user specified, use the command invoker
+            target_user = user or interaction.user
+            
+            # Get membership history
+            history = get_clan_membership_history(
+                db,
+                discord_id=str(target_user.id),
+                include_inactive=include_inactive
+            )
+            
+            if not history:
+                await interaction.response.send_message(
+                    f"{target_user.display_name} has no clan membership history.",
+                    ephemeral=True
+                )
+                return
+            
+            # Create embed
+            embed = discord.Embed(
+                title=f"Clan History for {target_user.display_name}",
+                color=discord.Color.blue()
+            )
+            
+            for user_obj, membership in history:
+                clan_name = (
+                    CLAN1_NAME if membership.clan_role_id == str(CLAN1_ROLE_ID) else
+                    CLAN2_NAME if membership.clan_role_id == str(CLAN2_ROLE_ID) else
+                    membership.clan_role_id
+                )
+                
+                status = "Active" if membership.is_active else "⚫ Inactive"
+                joined = f"<t:{int(membership.joined_at.timestamp())}:f>"
+                
+                # Only show left date for inactive memberships
+                value = f"Joined: {joined}"
+                if not membership.is_active and membership.left_at:
+                    value += f"\nLeft: <t:{int(membership.left_at.timestamp())}:f>"
+                
+                embed.add_field(
+                    name=f"{clan_name} ({status})",
+                    value=value,
+                    inline=False
+                )
+            
+            await interaction.response.send_message(embed=embed)
+    
+    except Exception as e:
+        logging.error(f"Error showing clan history: {e}")
+        await interaction.response.send_message(
+            "An error occurred. Please try again later.",
+            ephemeral=True
+        )
+
+async def clan_changes(
+    interaction: discord.Interaction,
+    clan: Optional[str] = None,
+    days: int = 7
+):
+    """Show recent clan membership changes."""
+    try:
+        with get_db_session() as db:
+            # Convert clan name to role ID
+            clan_role_id = None
+            if clan:
+                clan = clan.lower()
+                if clan in CLAN1_ALIASES:
+                    clan_role_id = str(CLAN1_ROLE_ID)
+                elif clan in CLAN2_ALIASES:
+                    clan_role_id = str(CLAN2_ROLE_ID)
+            
+            # Calculate date range
+            end_date = datetime.utcnow()
+            start_date = end_date - timedelta(days=days)
+            
+            # Get changes
+            changes = get_clan_membership_history(
+                db,
+                clan_role_id=clan_role_id,
+                start_date=start_date,
+                end_date=end_date,
+                include_inactive=True
+            )
+            
+            if not changes:
+                await interaction.response.send_message(
+                    f"No changes in the last {days} days.",
+                    ephemeral=True
+                )
+                return
+            
+            # Create embed
+            embed = discord.Embed(
+                title=f"Clan Changes in the Last {days} Days",
+                color=discord.Color.blue()
+            )
+            
+            for user_obj, membership in changes:
+                clan_name = (
+                    CLAN1_NAME if membership.clan_role_id == str(CLAN1_ROLE_ID) else
+                    CLAN2_NAME if membership.clan_role_id == str(CLAN2_ROLE_ID) else
+                    membership.clan_role_id
+                )
+                
+                member = interaction.guild.get_member(int(user_obj.discord_id))
+                user_name = member.display_name if member else user_obj.display_name
+                
+                if membership.left_at and membership.left_at >= start_date:
+                    # Member left during the period
+                    embed.add_field(
+                        name=f"🔴 {user_name} left {clan_name}",
+                        value=f"<t:{int(membership.left_at.timestamp())}:f>",
+                        inline=False
+                    )
+                
+                if membership.joined_at >= start_date:
+                    # Member joined during the period
+                    embed.add_field(
+                        name=f"🟢 {user_name} joined {clan_name}",
+                        value=f"<t:{int(membership.joined_at.timestamp())}:f>",
+                        inline=False
+                    )
+            
+            await interaction.response.send_message(embed=embed)
+    
+    except Exception as e:
+        logging.error(f"Error showing clan changes: {e}")
+        await interaction.response.send_message(
+            "An error occurred. Please try again later.",
+            ephemeral=True
+        )
+
 def run_bot():
     """Run the bot."""
     try:
@@ -890,15 +1139,10 @@ def run_bot():
             except Exception as e:
                 logging.error(f"Error updating AFK statuses: {e}")
         
-        # Create bot instance
-        intents = discord.Intents.default()
-        intents.message_content = True
-        intents.members = True
-        
-        bot = RequiemBot(command_prefix="!", intents=intents)
-        
-        # Run the bot with auto-reconnect enabled
+        # Create and run bot
+        bot = RequiemBot()
         bot.run(TOKEN, reconnect=True)
+        
     except Exception as e:
         logging.error(f"Error during bot startup: {e}")
         # Wait for a moment before attempting to restart
