@@ -138,14 +138,15 @@ class RequiemBot(commands.Bot):
             async def afkhistory_command(interaction, user: discord.Member):
                 await afkhistory(interaction, user)
 
-            @self.tree.command(name="afkdelete", description="Delete AFK entries (Admin only)", guild=guild)
+            @self.tree.command(name="afkdelete", description="Delete AFK entries (Admin only, use /afkhistory to get the ID)", guild=guild)
             @app_commands.describe(
                 user="The user whose AFK entries you want to delete",
-                all_entries="Delete all entries for this user? If false, only deletes active entries"
+                all_entries="Delete all entries for this user? If false, only deletes active entries",
+                afk_id="Optional: Specific AFK entry ID to delete (overrides all_entries)"
             )
             @has_required_role()
-            async def afkdelete_command(interaction, user: discord.Member, all_entries: bool = False):
-                await afkdelete(interaction, user, all_entries)
+            async def afkdelete_command(interaction, user: discord.Member, all_entries: bool = False, afk_id: Optional[int] = None):
+                await afkdelete(interaction, user, all_entries, afk_id)
 
             @self.tree.command(name="afkstats", description="Show AFK statistics", guild=guild)
             async def afkstats_command(interaction):
@@ -603,7 +604,7 @@ async def afkhistory(interaction: discord.Interaction, user: discord.Member):
                     status = "⚫ Inactive"  # Inactive
                 
                 embed.add_field(
-                    name=f"{status}",
+                    name=f"{status} - ID: {afk.id}",
                     value=(
                         f"From: <t:{int(afk.start_date.timestamp())}:f>\n"
                         f"Until: <t:{int(afk.end_date.timestamp())}:f>\n"
@@ -622,13 +623,22 @@ async def afkhistory(interaction: discord.Interaction, user: discord.Member):
             ephemeral=True
         )
 
-async def afkdelete(interaction: discord.Interaction, user: discord.Member, all_entries: bool = False):
+async def afkdelete(interaction: discord.Interaction, user: discord.Member, all_entries: bool = False, afk_id: Optional[int] = None):
     """Delete AFK entries for a user."""
     try:
         # Check if user has required role
         if not any(role.id in [ADMIN_ROLE_ID, OFFICER_ROLE_ID] for role in interaction.user.roles):
             await interaction.response.send_message(
                 "❌ You don't have permission to use this command!",
+                ephemeral=True
+            )
+            return
+
+        # Check if at least one optional parameter is provided
+        if not all_entries and afk_id is None:
+            await interaction.response.send_message(
+                "❌ Please specify either `all_entries:true` to delete all entries, or provide a specific `afk_id` to delete.\n"
+                "You can find the AFK ID using the `/afkhistory` command.",
                 ephemeral=True
             )
             return
@@ -643,19 +653,36 @@ async def afkdelete(interaction: discord.Interaction, user: discord.Member, all_
             )
             
             # Delete AFK entries
-            deleted = delete_afk_entries(db, db_user, all_entries)
+            deleted = delete_afk_entries(db, db_user, all_entries, afk_id)
             
             if deleted > 0:
-                await interaction.response.send_message(
-                    f"✅ Deleted {deleted} AFK {'entries' if deleted > 1 else 'entry'} for {user.display_name}.",
-                    ephemeral=True
-                )
+                if afk_id:
+                    await interaction.response.send_message(
+                        f"✅ Successfully deleted AFK entry {afk_id} for {user.display_name}.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.response.send_message(
+                        f"✅ Deleted {deleted} AFK {'entries' if deleted > 1 else 'entry'} for {user.display_name}.",
+                        ephemeral=True
+                    )
             else:
-                await interaction.response.send_message(
-                    f"❌ No {'AFK entries' if all_entries else 'active AFK entries'} found for {user.display_name}.",
-                    ephemeral=True
-                )
+                if afk_id:
+                    await interaction.response.send_message(
+                        f"❌ No AFK entry found with ID {afk_id} for {user.display_name}.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.response.send_message(
+                        f"❌ No AFK entries found for {user.display_name}.",
+                        ephemeral=True
+                    )
                 
+    except ValueError as e:
+        await interaction.response.send_message(
+            f"❌ {str(e)}",
+            ephemeral=True
+        )
     except Exception as e:
         logging.error(f"Error in afkdelete command: {e}")
         await interaction.response.send_message(

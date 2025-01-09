@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 import os
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
@@ -28,9 +28,40 @@ def get_db_url():
     logger.info(f"Connecting to PostgreSQL at {db_host}:{db_port} as {db_user}")
     return f"postgresql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
 
+def add_is_deleted_column():
+    """Add is_deleted column to afk_entries table if it doesn't exist."""
+    try:
+        engine = create_engine(get_db_url())
+        with engine.connect() as connection:
+            # Check if column exists
+            result = connection.execute(text("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'afk_entries' 
+                AND column_name = 'is_deleted';
+            """))
+            
+            if not result.fetchone():
+                logger.info("Adding is_deleted column to afk_entries table...")
+                connection.execute(text("""
+                    ALTER TABLE afk_entries 
+                    ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+                """))
+                connection.commit()
+                logger.info("Successfully added is_deleted column")
+            else:
+                logger.info("is_deleted column already exists")
+                
+    except Exception as e:
+        logger.error(f"Error adding is_deleted column: {e}")
+        raise
+
 def migrate_data():
     """Migrate data from SQLite to PostgreSQL."""
     try:
+        # First, add the new column
+        add_is_deleted_column()
+        
         # Connect to SQLite database
         sqlite_path = "database.db"  # SQLite database file in the same directory
         if not os.path.exists(sqlite_path):

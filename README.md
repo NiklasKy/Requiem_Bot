@@ -30,16 +30,44 @@ See `.env.example` for all required environment variables.
 
 The API is available at `http://localhost:8000` in development mode or `https://your-domain` in production mode.
 
-### Authentication
+#### Authentication
 
 All API endpoints require authentication using a Bearer token. Include the following header in your requests:
 ```
 Authorization: Bearer your-api-secret-key
 ```
 
-### Available Endpoints
+#### Available Endpoints
 
-#### Clan Memberships
+##### AFK Status
+```http
+GET /api/afk
+```
+Get all active and non-deleted AFK entries.
+
+```http
+GET /api/afk/{discord_id}
+```
+Get AFK history for a specific user (excludes deleted entries).
+
+Example Response:
+```json
+[
+    {
+        "id": 1,
+        "user_id": 1,
+        "start_date": "2025-01-08T18:27:06.796168",
+        "end_date": "2025-01-09T18:27:06.796168",
+        "reason": "Vacation",
+        "is_active": true,
+        "is_deleted": false,
+        "created_at": "2025-01-08T18:27:06.796168",
+        "ended_at": null
+    }
+]
+```
+
+##### Clan Memberships
 ```http
 GET /api/clan/memberships
 ```
@@ -66,7 +94,7 @@ Example Response:
 ]
 ```
 
-#### Clan Members
+##### Clan Members
 ```http
 GET /api/clan/{clan_role_id}/members
 ```
@@ -87,34 +115,7 @@ Example Response:
 ]
 ```
 
-#### AFK Status
-```http
-GET /api/afk
-```
-Get all active AFK entries.
-
-```http
-GET /api/afk/{discord_id}
-```
-Get AFK history for a specific user.
-
-Example Response:
-```json
-[
-    {
-        "id": 1,
-        "user_id": 1,
-        "start_date": "2025-01-08T18:27:06.796168",
-        "end_date": "2025-01-09T18:27:06.796168",
-        "reason": "Vacation",
-        "is_active": true,
-        "created_at": "2025-01-08T18:27:06.796168",
-        "ended_at": null
-    }
-]
-```
-
-#### Discord Role Members
+##### Discord Role Members
 ```http
 GET /api/discord/role/{role_id}/members
 ```
@@ -144,6 +145,9 @@ Invoke-WebRequest -Uri "http://localhost:8000/api/clan/memberships" -Headers $he
 
 # Get memberships with filters
 Invoke-WebRequest -Uri "http://localhost:8000/api/clan/memberships?clan_role_id=791436960585220097&include_inactive=true&days=30" -Headers $headers -Method GET
+
+# Get AFK entries for a specific user
+Invoke-WebRequest -Uri "http://localhost:8000/api/afk/148445299969490944" -Headers $headers -Method GET
 ```
 
 ## HTTPS Setup (Production)
@@ -352,8 +356,8 @@ docker compose exec db pg_restore -U postgres -v -d postgres /backups/backup.dum
 - `/afkreturn`: End AFK status
 - `/afklist`: Show all active AFK users
 - `/afkmy`: Show your personal AFK entries
-- `/afkhistory <user>`: Show AFK history for a user
-- `/afkdelete <user> [all_entries]`: Delete AFK entries (admin only)
+- `/afkhistory <user>`: Show AFK history for a user (includes AFK IDs for admin commands)
+- `/afkdelete <user> <all_entries|afk_id>`: Delete AFK entries (Admin only, requires either all_entries:true or a specific afk_id from /afkhistory)
 - `/afkstats`: Show AFK statistics
 - `/afkremove <afk_id>`: Remove a future AFK entry
 - `/afkextend <afk_id> <hours>`: Extend an existing AFK entry by specified hours (use /afkmy to get the ID)
@@ -470,7 +474,10 @@ python migrate_db.py
 
 #### /afkdelete
 - `user`: The user whose AFK entries you want to delete
-- `all_entries` (optional): Delete all entries for this user? If false, only deletes active entries
+- `all_entries`: Set to true to delete all entries for this user (required if no afk_id provided)
+- `afk_id`: Specific AFK entry ID to delete (required if all_entries is false, use /afkhistory to get the ID)
+
+Note: Either `all_entries:true` or a specific `afk_id` must be provided.
 
 #### /getmembers
 - `role`: The role to check members for 
@@ -540,3 +547,49 @@ CLAN2_ALIASES=alias3,alias4  # Comma-separated list of aliases for second clan
 ```
 
 These variables are used to customize the clan names and their aliases in both the Discord bot commands and API responses. 
+
+### AFK Management Features
+
+The bot provides comprehensive AFK (Away From Keyboard) management with the following features:
+- Set AFK status with specific start and end dates/times
+- Quick AFK setting until end of day
+- View active and scheduled AFK entries
+- View AFK history
+- Extend existing AFK entries
+- Remove future AFK entries
+- Soft deletion of AFK entries (entries are marked as deleted but preserved in the database)
+- Automatic status updates
+- AFK statistics
+
+### AFK Management Commands
+- `/afk <start_date> <start_time> <end_date> <end_time> <reason>`: Set AFK status with specific dates
+- `/afkquick <reason> [days]`: Quick AFK until end of day (or specified number of days)
+- `/afkreturn`: End AFK status
+- `/afklist`: Show all active AFK users
+- `/afkmy`: Show your personal AFK entries
+- `/afkhistory <user>`: Show AFK history for a user (includes AFK IDs for admin commands)
+- `/afkdelete <user> <all_entries|afk_id>`: Mark AFK entries as deleted (Admin only, requires either all_entries:true or a specific afk_id from /afkhistory)
+- `/afkstats`: Show AFK statistics
+- `/afkremove <afk_id>`: Remove a future AFK entry
+- `/afkextend <afk_id> <hours>`: Extend an existing AFK entry by specified hours (use /afkmy to get the ID)
+
+### Database Management
+
+#### AFK Entry States
+AFK entries can have the following states:
+- **Active**: Current and valid AFK entries
+- **Inactive**: Past or manually ended AFK entries
+- **Deleted**: Entries marked as deleted (but preserved in database)
+- **Scheduled**: Future AFK entries
+
+When an AFK entry is "deleted" using the `/afkdelete` command, it is not actually removed from the database. Instead:
+- The entry is marked as deleted (`is_deleted = true`)
+- The entry is set to inactive (`is_active = false`)
+- The `ended_at` timestamp is set to the deletion time
+- The entry remains in the database for historical tracking
+
+This soft deletion approach provides several benefits:
+- Maintains a complete history of AFK entries
+- Allows for potential recovery of accidentally deleted entries
+- Enables better tracking and statistics
+- Preserves data integrity and relationships 

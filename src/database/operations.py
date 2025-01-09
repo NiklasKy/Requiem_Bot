@@ -123,13 +123,7 @@ def get_active_afk(
     clan_role_id: Optional[str] = None,
     discord_id: Optional[str] = None
 ) -> List[Tuple[User, AFKEntry]]:
-    """Get all active AFK users, optionally filtered by clan, user_id, or discord_id.
-    
-    An AFK entry is considered active if:
-    1. is_active is True
-    2. Current time is between start_date and end_date
-    3. ended_at is either NULL or after the current time
-    """
+    """Get all active AFK users, optionally filtered by clan, user_id, or discord_id."""
     current_time = datetime.utcnow()
     
     query = (
@@ -138,6 +132,7 @@ def get_active_afk(
         .filter(
             and_(
                 AFKEntry.is_active == True,
+                AFKEntry.is_deleted == False,
                 AFKEntry.start_date <= current_time,
                 AFKEntry.end_date >= current_time,
                 or_(
@@ -166,7 +161,8 @@ def get_user_afk_history(
 ) -> List[AFKEntry]:
     """Get AFK history for a specific user."""
     return db.query(AFKEntry).filter(
-        AFKEntry.user_id == user.id
+        AFKEntry.user_id == user.id,
+        AFKEntry.is_deleted == False
     ).order_by(AFKEntry.created_at.desc()).limit(limit).all()
 
 def get_afk_statistics(
@@ -175,7 +171,7 @@ def get_afk_statistics(
 ) -> dict:
     """Get AFK statistics."""
     try:
-        base_query = db.query(AFKEntry).join(User)
+        base_query = db.query(AFKEntry).join(User).filter(AFKEntry.is_deleted == False)
         if clan_role_id:
             base_query = base_query.filter(User.clan_role_id == clan_role_id)
         
@@ -198,7 +194,11 @@ def get_afk_statistics(
         ).count()
         
         # Total unique users
-        total_users = db.query(func.count(func.distinct(AFKEntry.user_id))).scalar()
+        total_users = db.query(
+            func.count(
+                func.distinct(AFKEntry.user_id)
+            )
+        ).filter(AFKEntry.is_deleted == False).scalar()
         
         # Calculate average duration only for completed entries
         avg_duration_query = db.query(
@@ -207,7 +207,8 @@ def get_afk_statistics(
             )
         ).filter(
             AFKEntry.end_date != None,
-            AFKEntry.start_date != None
+            AFKEntry.start_date != None,
+            AFKEntry.is_deleted == False
         )
         
         average_duration = avg_duration_query.scalar()
@@ -231,17 +232,56 @@ def get_afk_statistics(
 def delete_afk_entries(
     db: Session,
     user: User,
-    all_entries: bool = False
+    all_entries: bool = False,
+    afk_id: Optional[int] = None
 ) -> int:
-    """Delete AFK entries for a user."""
-    query = db.query(AFKEntry).filter(AFKEntry.user_id == user.id)
+    """Mark AFK entries as deleted.
+    
+    Args:
+        db: Database session
+        user: User object
+        all_entries: Whether to mark all entries or only active ones as deleted
+        afk_id: Optional specific AFK entry ID to mark as deleted
+        
+    Returns:
+        Number of marked entries
+    """
+    current_time = datetime.utcnow()
+    
+    if afk_id is not None:
+        # Mark specific AFK entry as deleted
+        entry = db.query(AFKEntry).filter(
+            AFKEntry.id == afk_id,
+            AFKEntry.user_id == user.id,
+            AFKEntry.is_deleted == False
+        ).first()
+        
+        if not entry:
+            raise ValueError(f"No AFK entry found with ID {afk_id} for this user")
+            
+        entry.is_deleted = True
+        entry.is_active = False
+        entry.ended_at = current_time
+        db.commit()
+        return 1
+    
+    # Mark multiple entries as deleted
+    query = db.query(AFKEntry).filter(
+        AFKEntry.user_id == user.id,
+        AFKEntry.is_deleted == False
+    )
     
     if not all_entries:
         query = query.filter(AFKEntry.is_active == True)
     
-    deleted_count = query.delete()
+    marked_count = query.update({
+        "is_deleted": True,
+        "is_active": False,
+        "ended_at": current_time
+    })
+    
     db.commit()
-    return deleted_count
+    return marked_count
 
 def track_raid_signup(
     db: Session,
@@ -366,14 +406,7 @@ def get_user_active_and_future_afk(
     db: Session,
     user_id: int
 ) -> List[AFKEntry]:
-    """Get all active and future AFK entries for a user.
-    
-    Returns entries where:
-    1. ended_at is NULL AND
-    2. Either:
-       - is_active is True (current active entries) OR
-       - is_active is False (future entries)
-    """
+    """Get all active and future AFK entries for a user."""
     current_time = datetime.utcnow()
     
     return (
@@ -381,6 +414,7 @@ def get_user_active_and_future_afk(
         .filter(
             and_(
                 AFKEntry.user_id == user_id,
+                AFKEntry.is_deleted == False,
                 AFKEntry.ended_at == None,
                 or_(
                     # Active entries
@@ -398,7 +432,7 @@ def get_user_active_and_future_afk(
         )
         .order_by(AFKEntry.start_date.asc())
         .all()
-    ) 
+    )
 
 def get_clan_active_and_future_afk(
     db: Session,

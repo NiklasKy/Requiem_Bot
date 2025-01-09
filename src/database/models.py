@@ -34,6 +34,7 @@ class AFKEntry(Base):
     end_date = Column(DateTime, nullable=False)
     reason = Column(Text)
     is_active = Column(Boolean, default=True)
+    is_deleted = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     ended_at = Column(DateTime)
 
