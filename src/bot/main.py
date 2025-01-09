@@ -455,16 +455,14 @@ async def afklist(interaction: discord.Interaction):
             )
             return
 
+        await interaction.response.defer()
+
         with get_db_session() as db:
-            # Create embed
-            embed = discord.Embed(
-                title="🕒 AFK Entries",
-                description="Active and scheduled AFK entries (all times in UTC)",
-                color=discord.Color.blue()
-            )
-            
             current_time = datetime.utcnow()
             found_entries = False
+            embeds = []
+            current_embed = None
+            field_count = 0
 
             if is_admin:
                 # Show all clans for admins
@@ -475,12 +473,35 @@ async def afklist(interaction: discord.Interaction):
                     entries = get_clan_active_and_future_afk(db, str(clan_id))
                     if entries:
                         found_entries = True
-                        embed.add_field(
+                        
+                        # Create new embed if needed
+                        if current_embed is None or field_count >= 24:
+                            current_embed = discord.Embed(
+                                title="🕒 AFK Entries",
+                                description="Active and scheduled AFK entries (all times in UTC)",
+                                color=discord.Color.blue()
+                            )
+                            embeds.append(current_embed)
+                            field_count = 0
+
+                        current_embed.add_field(
                             name=f"__**{clan_name}**__",
                             value="⎯" * 20,  # Divider line
                             inline=False
                         )
+                        field_count += 1
+
                         for user, afk in entries:
+                            # Create new embed if needed
+                            if field_count >= 24:
+                                current_embed = discord.Embed(
+                                    title="🕒 AFK Entries (Continued)",
+                                    description="Active and scheduled AFK entries (all times in UTC)",
+                                    color=discord.Color.blue()
+                                )
+                                embeds.append(current_embed)
+                                field_count = 0
+
                             # Determine status
                             if current_time < afk.start_date:
                                 status = "⚪ Scheduled"  # Future
@@ -496,7 +517,7 @@ async def afklist(interaction: discord.Interaction):
                             except:
                                 user_name = user.username
 
-                            embed.add_field(
+                            current_embed.add_field(
                                 name=f"{status} - {user_name}",
                                 value=(
                                     f"From: <t:{int(afk.start_date.timestamp())}:f>\n"
@@ -505,6 +526,7 @@ async def afklist(interaction: discord.Interaction):
                                 ),
                                 inline=False
                             )
+                            field_count += 1
             else:
                 # Show only user's clan
                 clan_name = CLAN1_NAME if user_clan_role_id == str(CLAN1_ROLE_ID) else CLAN2_NAME
@@ -512,12 +534,32 @@ async def afklist(interaction: discord.Interaction):
                 
                 if entries:
                     found_entries = True
-                    embed.add_field(
+                    current_embed = discord.Embed(
+                        title="🕒 AFK Entries",
+                        description="Active and scheduled AFK entries (all times in UTC)",
+                        color=discord.Color.blue()
+                    )
+                    embeds.append(current_embed)
+                    field_count = 0
+
+                    current_embed.add_field(
                         name=f"__**{clan_name}**__",
                         value="⎯" * 20,  # Divider line
                         inline=False
                     )
+                    field_count += 1
+
                     for user, afk in entries:
+                        # Create new embed if needed
+                        if field_count >= 24:
+                            current_embed = discord.Embed(
+                                title="🕒 AFK Entries (Continued)",
+                                description="Active and scheduled AFK entries (all times in UTC)",
+                                color=discord.Color.blue()
+                            )
+                            embeds.append(current_embed)
+                            field_count = 0
+
                         # Determine status
                         if current_time < afk.start_date:
                             status = "⚪ Scheduled"  # Future
@@ -533,7 +575,7 @@ async def afklist(interaction: discord.Interaction):
                         except:
                             user_name = user.username
 
-                        embed.add_field(
+                        current_embed.add_field(
                             name=f"{status} - {user_name}",
                             value=(
                                 f"From: <t:{int(afk.start_date.timestamp())}:f>\n"
@@ -542,22 +584,34 @@ async def afklist(interaction: discord.Interaction):
                             ),
                             inline=False
                         )
+                        field_count += 1
 
             if not found_entries:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "📝 No active or scheduled AFK entries found.",
                     ephemeral=True
                 )
                 return
 
-            await interaction.response.send_message(embed=embed)
+            # Send all embeds
+            for i, embed in enumerate(embeds):
+                if i == 0:
+                    await interaction.followup.send(embed=embed)
+                else:
+                    await interaction.followup.send(embed=embed)
             
     except Exception as e:
         logging.error(f"Error in afklist command: {e}")
-        await interaction.response.send_message(
-            f"❌ An error occurred: {str(e)}",
-            ephemeral=True
-        )
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                f"❌ An error occurred: {str(e)}",
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send(
+                f"❌ An error occurred: {str(e)}",
+                ephemeral=True
+            )
 
 async def afkhistory(interaction: discord.Interaction, user: discord.Member):
     """Show AFK history for a user."""

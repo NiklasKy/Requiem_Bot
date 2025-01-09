@@ -160,10 +160,26 @@ def get_user_afk_history(
     limit: int = 5
 ) -> List[AFKEntry]:
     """Get AFK history for a specific user."""
-    return db.query(AFKEntry).filter(
-        AFKEntry.user_id == user.id,
-        AFKEntry.is_deleted == False
-    ).order_by(AFKEntry.created_at.desc()).limit(limit).all()
+    return (
+        db.query(AFKEntry)
+        .filter(
+            AFKEntry.user_id == user.id,
+            AFKEntry.is_deleted == False
+        )
+        .distinct(
+            AFKEntry.start_date,
+            AFKEntry.end_date,
+            AFKEntry.reason
+        )
+        .order_by(
+            AFKEntry.start_date,
+            AFKEntry.end_date,
+            AFKEntry.reason,
+            AFKEntry.created_at.desc()
+        )
+        .limit(limit)
+        .all()
+    )
 
 def get_afk_statistics(
     db: Session,
