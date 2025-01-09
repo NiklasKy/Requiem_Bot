@@ -1,6 +1,6 @@
 """Database operations for the application."""
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 
 from sqlalchemy import and_, or_, func
@@ -606,3 +606,46 @@ def get_clan_membership_changes(
         )
     
     return query.order_by(ClanMembership.joined_at.desc()).all() 
+
+def extend_afk(
+    db: Session,
+    user: User,
+    afk_id: int,
+    hours: int
+) -> AFKEntry:
+    """Extend an existing AFK entry by a number of hours.
+    
+    Args:
+        db: Database session
+        user: User object
+        afk_id: ID of the AFK entry to extend
+        hours: Number of hours to extend by
+        
+    Returns:
+        Updated AFKEntry
+        
+    Raises:
+        ValueError: If the AFK entry doesn't exist, belongs to another user,
+                  or is already ended
+    """
+    # Get the AFK entry
+    afk_entry = db.query(AFKEntry).filter(AFKEntry.id == afk_id).first()
+    
+    if not afk_entry:
+        raise ValueError("AFK entry not found")
+        
+    if afk_entry.user_id != user.id:
+        raise ValueError("This AFK entry belongs to another user")
+        
+    if not afk_entry.is_active:
+        raise ValueError("Cannot extend an inactive AFK entry")
+        
+    if afk_entry.ended_at:
+        raise ValueError("Cannot extend an AFK entry that has been ended early")
+        
+    # Calculate new end date
+    afk_entry.end_date = afk_entry.end_date + timedelta(hours=hours)
+    
+    db.commit()
+    db.refresh(afk_entry)
+    return afk_entry 

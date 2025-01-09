@@ -356,6 +356,7 @@ docker compose exec db pg_restore -U postgres -v -d postgres /backups/backup.dum
 - `/afkdelete <user> [all_entries]`: Delete AFK entries (admin only)
 - `/afkstats`: Show AFK statistics
 - `/afkremove <afk_id>`: Remove a future AFK entry
+- `/afkextend <afk_id> <hours>`: Extend an existing AFK entry by specified hours (use /afkmy to get the ID)
 
 ### Member Management
 - `/getmembers <role>`: List all members with a specific role
@@ -473,6 +474,10 @@ python migrate_db.py
 
 #### /getmembers
 - `role`: The role to check members for 
+
+#### /afkextend
+- `afk_id`: The ID of the AFK entry to extend (use /afkmy to see your entries)
+- `hours`: Number of hours to extend the AFK entry by
 
 # API Documentation
 

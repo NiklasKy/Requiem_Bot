@@ -22,7 +22,8 @@ from src.database.operations import (delete_afk_entries, get_active_afk,
                                    set_afk, track_raid_signup, update_afk_status,
                                    update_afk_active_status, get_user_active_and_future_afk,
                                    get_clan_active_and_future_afk, remove_future_afk,
-                                   sync_clan_memberships, get_clan_membership_history)
+                                   sync_clan_memberships, get_clan_membership_history,
+                                   extend_afk)
 from src.utils.time_parser import parse_date, parse_time, parse_datetime
 
 # Create logs directory if it doesn't exist
@@ -168,6 +169,14 @@ class RequiemBot(commands.Bot):
             @has_required_role()
             async def checksignups_command(interaction, role: discord.Role, event_id: str):
                 await checksignups(interaction, role, event_id)
+
+            @self.tree.command(name="afkextend", description="Extend an existing AFK entry (use /afkmy to get the ID)", guild=guild)
+            @app_commands.describe(
+                afk_id="The ID of the AFK entry to extend (use /afkmy to see your entries)",
+                hours="Number of hours to extend by"
+            )
+            async def afkextend_command(interaction: discord.Interaction, afk_id: int, hours: int):
+                await afkextend(interaction, afk_id, hours)
 
             # Test command to verify command syncing
             @self.tree.command(name="rqping", description="Test command - responds with Pong!", guild=guild)
@@ -1120,6 +1129,46 @@ async def clan_changes(
         logging.error(f"Error showing clan changes: {e}")
         await interaction.response.send_message(
             "An error occurred. Please try again later.",
+            ephemeral=True
+        )
+
+async def afkextend(interaction: discord.Interaction, afk_id: int, hours: int):
+    """Extend an existing AFK entry."""
+    try:
+        if hours <= 0:
+            await interaction.response.send_message(
+                "❌ Number of hours must be positive!",
+                ephemeral=True
+            )
+            return
+            
+        with get_db_session() as db:
+            # Get user from database
+            user = get_or_create_user(
+                db,
+                str(interaction.user.id),
+                interaction.user.name,
+                interaction.user.display_name
+            )
+            
+            # Try to extend the AFK entry
+            afk_entry = extend_afk(db, user, afk_id, hours)
+            
+            await interaction.response.send_message(
+                f"✅ Successfully extended your AFK entry! (all times in UTC)\n"
+                f"New end time: <t:{int(afk_entry.end_date.timestamp())}:f>",
+                ephemeral=True
+            )
+            
+    except ValueError as e:
+        await interaction.response.send_message(
+            f"❌ {str(e)}",
+            ephemeral=True
+        )
+    except Exception as e:
+        logging.error(f"Error in afkextend command: {e}")
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
             ephemeral=True
         )
 
