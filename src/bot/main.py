@@ -1171,14 +1171,24 @@ async def clan_changes(
                     ephemeral=True
                 )
                 return
+
+            await interaction.response.defer()
             
-            # Create embed
-            embed = discord.Embed(
-                title=f"Clan Changes in the Last {days} Days",
-                color=discord.Color.blue()
-            )
+            # Create embeds
+            embeds = []
+            current_embed = None
+            field_count = 0
             
             for user_obj, membership in changes:
+                # Create new embed if needed
+                if current_embed is None or field_count >= 24:
+                    current_embed = discord.Embed(
+                        title=f"Clan Changes in the Last {days} Days" + (" (Continued)" if embeds else ""),
+                        color=discord.Color.blue()
+                    )
+                    embeds.append(current_embed)
+                    field_count = 0
+                
                 clan_name = (
                     CLAN1_NAME if membership.clan_role_id == str(CLAN1_ROLE_ID) else
                     CLAN2_NAME if membership.clan_role_id == str(CLAN2_ROLE_ID) else
@@ -1190,28 +1200,41 @@ async def clan_changes(
                 
                 if membership.left_at and membership.left_at >= start_date:
                     # Member left during the period
-                    embed.add_field(
+                    current_embed.add_field(
                         name=f"🔴 {user_name} left {clan_name}",
                         value=f"<t:{int(membership.left_at.timestamp())}:f>",
                         inline=False
                     )
+                    field_count += 1
                 
                 if membership.joined_at >= start_date:
                     # Member joined during the period
-                    embed.add_field(
+                    current_embed.add_field(
                         name=f"🟢 {user_name} joined {clan_name}",
                         value=f"<t:{int(membership.joined_at.timestamp())}:f>",
                         inline=False
                     )
+                    field_count += 1
             
-            await interaction.response.send_message(embed=embed)
+            # Send all embeds
+            for i, embed in enumerate(embeds):
+                if i == 0:
+                    await interaction.followup.send(embed=embed)
+                else:
+                    await interaction.followup.send(embed=embed)
     
     except Exception as e:
         logging.error(f"Error showing clan changes: {e}")
-        await interaction.response.send_message(
-            "An error occurred. Please try again later.",
-            ephemeral=True
-        )
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                "An error occurred. Please try again later.",
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send(
+                "An error occurred. Please try again later.",
+                ephemeral=True
+            )
 
 async def afkextend(interaction: discord.Interaction, afk_id: int, hours: int):
     """Extend an existing AFK entry."""
