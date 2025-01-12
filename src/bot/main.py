@@ -179,11 +179,6 @@ class RequiemBot(commands.Bot):
             async def afkextend_command(interaction: discord.Interaction, afk_id: int, hours: int):
                 await afkextend(interaction, afk_id, hours)
 
-            # Test command to verify command syncing
-            @self.tree.command(name="rqping", description="Test command - responds with Pong!", guild=guild)
-            async def rqping_command(interaction):
-                await interaction.response.send_message("Pong!")
-
             @self.tree.command(
                 name="clanhistory",
                 description="Show clan membership history for a user (Admin/Officer only)",
