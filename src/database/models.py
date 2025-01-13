@@ -66,4 +66,14 @@ class ClanMembership(Base):
     is_active = Column(Boolean, default=True)
 
     # Relationships
-    user = relationship("User", back_populates="clan_memberships") 
+    user = relationship("User", back_populates="clan_memberships")
+
+class GuildWelcomeMessage(Base):
+    """Welcome message model for guilds."""
+    __tablename__ = "guild_welcome_messages"
+
+    id = Column(Integer, primary_key=True)
+    guild_role_id = Column(String(20), nullable=False, unique=True)
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow) 

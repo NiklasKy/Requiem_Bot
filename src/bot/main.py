@@ -23,7 +23,8 @@ from src.database.operations import (delete_afk_entries, get_active_afk,
                                    update_afk_active_status, get_user_active_and_future_afk,
                                    get_clan_active_and_future_afk, remove_future_afk,
                                    sync_clan_memberships, get_clan_membership_history,
-                                   extend_afk)
+                                   extend_afk, set_guild_welcome_message, get_guild_welcome_message,
+                                   add_user_to_guild, get_all_welcome_messages, remove_user_from_guild)
 from src.utils.time_parser import parse_date, parse_time, parse_datetime
 
 # Create logs directory if it doesn't exist
@@ -50,6 +51,10 @@ OFFICER_ROLE_ID = int(os.getenv("OFFICER_ROLE_ID", "0"))
 CLAN1_ROLE_ID = int(os.getenv("CLAN1_ROLE_ID", "0"))  # Clan 1
 CLAN2_ROLE_ID = int(os.getenv("CLAN2_ROLE_ID", "0"))  # Clan 2
 BOT_NAME = os.getenv("BOT_NAME", "Requiem Bot")
+
+# Additional role IDs for clans
+CLAN1_ADDITIONAL_ROLES = [int(role_id.strip()) for role_id in os.getenv("CLAN1_ADDITIONAL_ROLES", "").split(",") if role_id.strip()]
+CLAN2_ADDITIONAL_ROLES = [int(role_id.strip()) for role_id in os.getenv("CLAN2_ADDITIONAL_ROLES", "").split(",") if role_id.strip()]
 
 # Clan Names and Aliases
 CLAN1_NAME = os.getenv("CLAN1_NAME", "Clan 1")
@@ -214,6 +219,76 @@ class RequiemBot(commands.Bot):
             ):
                 await clan_changes(interaction, clan, days)
 
+            @self.tree.command(
+                name="guildadd",
+                description="Add a user to a guild (Admin/Officer only)",
+                guild=guild
+            )
+            @app_commands.describe(
+                user="The user to add to the guild",
+                guild="The guild to add the user to",
+                send_welcome="Send welcome message to user (default: True)"
+            )
+            @has_required_role()
+            async def guildadd_command(
+                interaction: discord.Interaction,
+                user: discord.Member,
+                guild: str,
+                send_welcome: bool = True
+            ):
+                await guildadd(interaction, user, guild, send_welcome)
+
+            @self.tree.command(
+                name="welcomeset",
+                description="Set welcome message for a guild (Admin only)",
+                guild=guild
+            )
+            @app_commands.describe(
+                guild="The guild to set the welcome message for",
+                message="The welcome message to send to new members"
+            )
+            @has_admin_role()
+            async def welcomeset_command(
+                interaction: discord.Interaction,
+                guild: str,
+                message: str
+            ):
+                await setwelcome(interaction, guild, message)
+
+            @self.tree.command(
+                name="welcomeshow",
+                description="Show welcome messages for all guilds (Admin/Officer only)",
+                guild=guild
+            )
+            @app_commands.describe(
+                guild="Optional: Show message for specific guild only"
+            )
+            @has_required_role()
+            async def welcomeshow_command(
+                interaction: discord.Interaction,
+                guild: Optional[str] = None
+            ):
+                await welcomeshow(interaction, guild)
+
+            @self.tree.command(
+                name="guildremove",
+                description="Remove a user from a guild (Admin/Officer only)",
+                guild=guild
+            )
+            @app_commands.describe(
+                user="The user to remove from the guild",
+                guild="The guild to remove the user from",
+                kick_from_discord="Also kick the user from Discord (default: False)"
+            )
+            @has_required_role()
+            async def guildremove_command(
+                interaction: discord.Interaction,
+                user: discord.Member,
+                guild: str,
+                kick_from_discord: bool = False
+            ):
+                await guildremove(interaction, user, guild, kick_from_discord)
+
             # Sync the commands
             synced = await self.tree.sync(guild=guild)
             
@@ -328,6 +403,12 @@ def has_required_role():
     """Check if user has required role."""
     async def predicate(interaction: discord.Interaction):
         return any(role.id in [ADMIN_ROLE_ID, OFFICER_ROLE_ID] for role in interaction.user.roles)
+    return app_commands.check(predicate)
+
+def has_admin_role():
+    """Check if user has admin role."""
+    async def predicate(interaction: discord.Interaction):
+        return any(role.id == ADMIN_ROLE_ID for role in interaction.user.roles)
     return app_commands.check(predicate)
 
 async def afk(interaction, start_date, start_time, end_date, end_time, reason):
@@ -1253,6 +1334,365 @@ async def afkextend(interaction: discord.Interaction, afk_id: int, hours: int):
         )
     except Exception as e:
         logging.error(f"Error in afkextend command: {e}")
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
+
+async def guildadd(
+    interaction: discord.Interaction,
+    user: discord.Member,
+    guild: str,
+    send_welcome: bool = True
+):
+    """Add a user to a guild."""
+    try:
+        # Convert guild name to role ID
+        guild = guild.lower()
+        if guild in CLAN1_ALIASES:
+            guild_role_id = str(CLAN1_ROLE_ID)
+            guild_name = CLAN1_NAME
+            guild_role = interaction.guild.get_role(CLAN1_ROLE_ID)
+            additional_role_ids = CLAN1_ADDITIONAL_ROLES
+        elif guild in CLAN2_ALIASES:
+            guild_role_id = str(CLAN2_ROLE_ID)
+            guild_name = CLAN2_NAME
+            guild_role = interaction.guild.get_role(CLAN2_ROLE_ID)
+            additional_role_ids = CLAN2_ADDITIONAL_ROLES
+        else:
+            await interaction.response.send_message(
+                f"❌ Invalid guild name. Please use one of: {', '.join(CLAN1_ALIASES + CLAN2_ALIASES)}",
+                ephemeral=True
+            )
+            return
+
+        with get_db_session() as db:
+            # Get or create user in database
+            db_user = get_or_create_user(
+                db,
+                str(user.id),
+                user.name,
+                user.display_name
+            )
+            
+            try:
+                # Add user to guild in database
+                add_user_to_guild(db, db_user, guild_role_id)
+                
+                # Add main Discord role
+                await user.add_roles(guild_role)
+                
+                # Add additional roles
+                roles_added = [guild_role]
+                for role_id in additional_role_ids:
+                    role = interaction.guild.get_role(role_id)
+                    if role and role not in user.roles:
+                        await user.add_roles(role)
+                        roles_added.append(role)
+                
+                # Send welcome message if enabled
+                if send_welcome:
+                    welcome_msg = get_guild_welcome_message(db, guild_role_id)
+                    if welcome_msg:
+                        try:
+                            await user.send(welcome_msg)
+                        except discord.Forbidden:
+                            await interaction.followup.send(
+                                "⚠️ Could not send welcome message to user (DMs might be disabled)",
+                                ephemeral=True
+                            )
+                
+                # Create success message with added roles
+                roles_text = ", ".join(role.name for role in roles_added)
+                await interaction.response.send_message(
+                    f"✅ Successfully added {user.mention} to {guild_name}!\n"
+                    f"Added roles: {roles_text}",
+                    ephemeral=False
+                )
+                
+            except ValueError as e:
+                await interaction.response.send_message(
+                    f"❌ {str(e)}",
+                    ephemeral=True
+                )
+            
+    except Exception as e:
+        logging.error(f"Error in guildadd command: {e}")
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
+
+async def setwelcome(
+    interaction: discord.Interaction,
+    guild: str,
+    message: str
+):
+    """Set welcome message for a guild."""
+    try:
+        # Convert guild name to role ID
+        guild = guild.lower()
+        if guild in CLAN1_ALIASES:
+            guild_role_id = str(CLAN1_ROLE_ID)
+            guild_name = CLAN1_NAME
+        elif guild in CLAN2_ALIASES:
+            guild_role_id = str(CLAN2_ROLE_ID)
+            guild_name = CLAN2_NAME
+        else:
+            await interaction.response.send_message(
+                f"❌ Invalid guild name. Please use one of: {', '.join(CLAN1_ALIASES + CLAN2_ALIASES)}",
+                ephemeral=True
+            )
+            return
+
+        # Preserve line breaks by replacing them with \n
+        message = message.replace('\\n', '\n')
+
+        with get_db_session() as db:
+            # Set welcome message
+            set_guild_welcome_message(db, guild_role_id, message)
+            
+            # Show preview of the message
+            embed = discord.Embed(
+                title=f"✅ Welcome Message Set for {guild_name}",
+                description="Preview of how the message will appear:",
+                color=discord.Color.green()
+            )
+            
+            # Split message if too long
+            if len(message) > 4096:
+                parts = []
+                remaining = message
+                while remaining:
+                    if len(remaining) > 1024:
+                        split_index = remaining[:1024].rfind('\n')
+                        if split_index == -1:
+                            split_index = 1024
+                        
+                        parts.append(remaining[:split_index])
+                        remaining = remaining[split_index:].strip()
+                    else:
+                        parts.append(remaining)
+                        remaining = ""
+                
+                for i, part in enumerate(parts):
+                    embed.add_field(
+                        name="Message Preview" + (" (continued)" if i > 0 else ""),
+                        value=part,
+                        inline=False
+                    )
+            else:
+                embed.description = message
+            
+            await interaction.response.send_message(
+                embed=embed,
+                ephemeral=True
+            )
+            
+    except Exception as e:
+        logging.error(f"Error in setwelcome command: {e}")
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
+
+async def welcomeshow(
+    interaction: discord.Interaction,
+    guild: Optional[str] = None
+):
+    """Show welcome messages for all or specific guild."""
+    try:
+        # Convert guild name to role ID if specified
+        guild_role_id = None
+        if guild:
+            guild = guild.lower()
+            if guild in CLAN1_ALIASES:
+                guild_role_id = str(CLAN1_ROLE_ID)
+            elif guild in CLAN2_ALIASES:
+                guild_role_id = str(CLAN2_ROLE_ID)
+            else:
+                await interaction.response.send_message(
+                    f"❌ Invalid guild name. Please use one of: {', '.join(CLAN1_ALIASES + CLAN2_ALIASES)}",
+                    ephemeral=True
+                )
+                return
+
+        with get_db_session() as db:
+            # Get welcome messages
+            welcome_messages = get_all_welcome_messages(db)
+            
+            if not welcome_messages:
+                await interaction.response.send_message(
+                    "❌ No welcome messages found.",
+                    ephemeral=True
+                )
+                return
+            
+            # Filter messages if guild specified
+            if guild_role_id:
+                welcome_messages = [msg for msg in welcome_messages if msg.guild_role_id == guild_role_id]
+                if not welcome_messages:
+                    await interaction.response.send_message(
+                        f"❌ No welcome message found for specified guild.",
+                        ephemeral=True
+                    )
+                    return
+
+            await interaction.response.defer(ephemeral=True)
+            
+            for msg in welcome_messages:
+                # Convert role ID to guild name
+                if msg.guild_role_id == str(CLAN1_ROLE_ID):
+                    guild_name = CLAN1_NAME
+                elif msg.guild_role_id == str(CLAN2_ROLE_ID):
+                    guild_name = CLAN2_NAME
+                else:
+                    guild_name = f"Unknown Guild (Role ID: {msg.guild_role_id})"
+                
+                # Create embed for each message
+                embed = discord.Embed(
+                    title=f"📝 Welcome Message - {guild_name}",
+                    color=discord.Color.blue()
+                )
+
+                # Split message if too long
+                message = msg.message
+                parts = []
+                
+                # Split message into parts at line breaks or when too long
+                remaining = message
+                while remaining:
+                    if len(remaining) > 1024:
+                        # Try to split at a line break first
+                        split_index = remaining[:1024].rfind('\n')
+                        if split_index == -1:
+                            # If no line break found, split at the last space
+                            split_index = remaining[:1024].rfind(' ')
+                            if split_index == -1:
+                                split_index = 1024
+                        
+                        parts.append(remaining[:split_index])
+                        remaining = remaining[split_index:].strip()
+                    else:
+                        parts.append(remaining)
+                        remaining = ""
+                
+                # Add parts to embed with correct naming
+                for i, part in enumerate(parts):
+                    embed.add_field(
+                        name=f"{guild_name} - Message{' (continued)' if i > 0 else ''}",
+                        value=part,
+                        inline=False
+                    )
+                
+                # Add last updated timestamp
+                embed.add_field(
+                    name="Last Updated",
+                    value=f"<t:{int(msg.updated_at.timestamp())}:f>",
+                    inline=False
+                )
+                
+                # Send embed
+                if interaction.response.is_done():
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+                else:
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+    except Exception as e:
+        logging.error(f"Error in welcomeshow command: {e}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                f"❌ An error occurred: {str(e)}",
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send(
+                f"❌ An error occurred: {str(e)}",
+                ephemeral=True
+            )
+
+async def guildremove(
+    interaction: discord.Interaction,
+    user: discord.Member,
+    guild: str,
+    kick_from_discord: bool = False
+):
+    """Remove a user from a guild."""
+    try:
+        # Convert guild name to role ID
+        guild = guild.lower()
+        if guild in CLAN1_ALIASES:
+            guild_role_id = str(CLAN1_ROLE_ID)
+            guild_name = CLAN1_NAME
+            guild_role = interaction.guild.get_role(CLAN1_ROLE_ID)
+            additional_role_ids = CLAN1_ADDITIONAL_ROLES
+        elif guild in CLAN2_ALIASES:
+            guild_role_id = str(CLAN2_ROLE_ID)
+            guild_name = CLAN2_NAME
+            guild_role = interaction.guild.get_role(CLAN2_ROLE_ID)
+            additional_role_ids = CLAN2_ADDITIONAL_ROLES
+        else:
+            await interaction.response.send_message(
+                f"❌ Invalid guild name. Please use one of: {', '.join(CLAN1_ALIASES + CLAN2_ALIASES)}",
+                ephemeral=True
+            )
+            return
+
+        with get_db_session() as db:
+            # Get or create user in database
+            db_user = get_or_create_user(
+                db,
+                str(user.id),
+                user.name,
+                user.display_name
+            )
+            
+            try:
+                # Remove user from guild in database
+                remove_user_from_guild(db, db_user, guild_role_id)
+                
+                # Remove Discord roles
+                roles_removed = []
+                
+                # Remove main guild role
+                if guild_role in user.roles:
+                    await user.remove_roles(guild_role)
+                    roles_removed.append(guild_role)
+                
+                # Remove additional roles
+                for role_id in additional_role_ids:
+                    role = interaction.guild.get_role(role_id)
+                    if role and role in user.roles:
+                        await user.remove_roles(role)
+                        roles_removed.append(role)
+                
+                # Create success message with removed roles
+                roles_text = ", ".join(role.name for role in roles_removed)
+                message = f"✅ Successfully removed {user.mention} from {guild_name}!\nRemoved roles: {roles_text}"
+                
+                # Kick user if requested
+                if kick_from_discord:
+                    try:
+                        await user.kick(reason=f"Removed from {guild_name}")
+                        message += "\nUser was kicked from the Discord server."
+                    except discord.Forbidden:
+                        message += "\n⚠️ Could not kick user (insufficient permissions)"
+                    except Exception as e:
+                        message += f"\n⚠️ Could not kick user: {str(e)}"
+                
+                await interaction.response.send_message(
+                    message,
+                    ephemeral=False
+                )
+                
+            except ValueError as e:
+                await interaction.response.send_message(
+                    f"❌ {str(e)}",
+                    ephemeral=True
+                )
+            
+    except Exception as e:
+        logging.error(f"Error in guildremove command: {e}")
         await interaction.response.send_message(
             f"❌ An error occurred: {str(e)}",
             ephemeral=True

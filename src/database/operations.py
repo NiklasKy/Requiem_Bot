@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import and_, or_, func
 from sqlalchemy.orm import Session
 
-from src.database.models import AFKEntry, RaidSignup, User, ClanMembership
+from src.database.models import AFKEntry, RaidSignup, User, ClanMembership, GuildWelcomeMessage
 
 def get_or_create_user(
     db: Session,
@@ -699,3 +699,125 @@ def extend_afk(
     db.commit()
     db.refresh(afk_entry)
     return afk_entry 
+
+def set_guild_welcome_message(
+    db: Session,
+    guild_role_id: str,
+    message: str
+) -> GuildWelcomeMessage:
+    """Set or update welcome message for a guild."""
+    welcome_msg = db.query(GuildWelcomeMessage).filter(
+        GuildWelcomeMessage.guild_role_id == guild_role_id
+    ).first()
+    
+    if welcome_msg:
+        welcome_msg.message = message
+        welcome_msg.updated_at = datetime.utcnow()
+    else:
+        welcome_msg = GuildWelcomeMessage(
+            guild_role_id=guild_role_id,
+            message=message
+        )
+        db.add(welcome_msg)
+    
+    db.commit()
+    db.refresh(welcome_msg)
+    return welcome_msg
+
+def get_guild_welcome_message(
+    db: Session,
+    guild_role_id: str
+) -> Optional[str]:
+    """Get welcome message for a guild."""
+    welcome_msg = db.query(GuildWelcomeMessage).filter(
+        GuildWelcomeMessage.guild_role_id == guild_role_id
+    ).first()
+    
+    return welcome_msg.message if welcome_msg else None
+
+def get_all_welcome_messages(
+    db: Session
+) -> List[GuildWelcomeMessage]:
+    """Get all welcome messages."""
+    return db.query(GuildWelcomeMessage).all()
+
+def add_user_to_guild(
+    db: Session,
+    user: User,
+    guild_role_id: str
+) -> ClanMembership:
+    """Add a user to a guild (clan).
+    
+    Args:
+        db: Database session
+        user: User object
+        guild_role_id: Discord role ID of the guild/clan
+        
+    Returns:
+        Created ClanMembership object
+        
+    Raises:
+        ValueError: If user is already in the guild
+    """
+    # Check if user is already in this guild
+    existing = db.query(ClanMembership).filter(
+        and_(
+            ClanMembership.user_id == user.id,
+            ClanMembership.clan_role_id == guild_role_id,
+            ClanMembership.is_active == True
+        )
+    ).first()
+    
+    if existing:
+        raise ValueError("User is already a member of this guild")
+    
+    # Create new membership
+    membership = ClanMembership(
+        user_id=user.id,
+        clan_role_id=guild_role_id,
+        joined_at=datetime.utcnow(),
+        is_active=True
+    )
+    
+    db.add(membership)
+    db.commit()
+    db.refresh(membership)
+    return membership
+
+def remove_user_from_guild(
+    db: Session,
+    user: User,
+    guild_role_id: str
+) -> ClanMembership:
+    """Remove a user from a guild (clan).
+    
+    Args:
+        db: Database session
+        user: User object
+        guild_role_id: Discord role ID of the guild/clan
+        
+    Returns:
+        Updated ClanMembership object
+        
+    Raises:
+        ValueError: If user is not in the guild
+    """
+    # Check if user is in this guild
+    membership = db.query(ClanMembership).filter(
+        and_(
+            ClanMembership.user_id == user.id,
+            ClanMembership.clan_role_id == guild_role_id,
+            ClanMembership.is_active == True
+        )
+    ).first()
+    
+    if not membership:
+        raise ValueError("User is not a member of this guild")
+    
+    # Update membership
+    membership.is_active = False
+    membership.left_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(membership)
+    return membership 
