@@ -350,29 +350,31 @@ docker compose exec db pg_restore -U postgres -v -d postgres /backups/backup.dum
 
 ## Discord Commands
 
-### AFK Management
+### Available Commands
+
+#### AFK Management
 - `/afk <start_date> <start_time> <end_date> <end_time> <reason>`: Set AFK status with specific dates
 - `/afkquick <reason> [days]`: Quick AFK until end of day (or specified number of days)
 - `/afkreturn`: End AFK status
 - `/afklist`: Show all active AFK users
 - `/afkmy`: Show your personal AFK entries
 - `/afkhistory <user>`: Show AFK history for a user (includes AFK IDs for admin commands)
-- `/afkdelete <user> <all_entries|afk_id>`: Delete AFK entries (Admin only, requires either all_entries:true or a specific afk_id from /afkhistory)
+- `/afkdelete <user> <all_entries|afk_id>`: Mark AFK entries as deleted (Admin only)
 - `/afkstats`: Show AFK statistics
 - `/afkremove <afk_id>`: Remove a future AFK entry
-- `/afkextend <afk_id> <hours>`: Extend an existing AFK entry by specified hours (use /afkmy to get the ID)
+- `/afkextend <afk_id> <hours>`: Extend an existing AFK entry by specified hours
 
-### Member Management
+#### Guild Management
+- `/guildadd <user> <guild> [send_welcome]`: Add a user to a guild (Admin/Officer only)
+- `/guildremove <user> <guild> [kick_from_discord]`: Remove a user from a guild (Admin/Officer only)
+- `/welcomeset <guild> <message>`: Set welcome message for a guild (Admin only)
+- `/welcomeshow [guild]`: Show welcome messages for all guilds (Admin/Officer only)
+
+#### Utility Commands
 - `/getmembers <role>`: List all members with a specific role
-- `/checksignups <role> <event_id>`: Compare role members with Raid-Helper signups
-
-### Clan Management
-- `/clanhistory [user]`: Show clan membership history for a user (Admin/Officer only)
-  - `user`: Optional, defaults to yourself
-  - `include_inactive`: Optional, include past memberships (default: false)
+- `/checksignups <role> <event_id>`: Compare role members with Raid-Helper signups (Admin/Officer only)
+- `/clanhistory [user] [include_inactive]`: Show clan membership history (Admin/Officer only)
 - `/clanchanges [clan] [days]`: Show recent clan membership changes (Admin/Officer only)
-  - `clan`: Optional, filter by specific clan
-  - `days`: Optional, number of days to look back (default: 7)
 
 ## Clan Tracking Features
 
@@ -568,7 +570,7 @@ The bot provides comprehensive AFK (Away From Keyboard) management with the foll
 - `/afklist`: Show all active AFK users
 - `/afkmy`: Show your personal AFK entries
 - `/afkhistory <user>`: Show AFK history for a user (includes AFK IDs for admin commands)
-- `/afkdelete <user> <all_entries|afk_id>`: Mark AFK entries as deleted (Admin only, requires either all_entries:true or a specific afk_id from /afkhistory)
+- `/afkdelete <user> <all_entries|afk_id>`: Mark AFK entries as deleted (Admin only)
 - `/afkstats`: Show AFK statistics
 - `/afkremove <afk_id>`: Remove a future AFK entry
 - `/afkextend <afk_id> <hours>`: Extend an existing AFK entry by specified hours (use /afkmy to get the ID)
@@ -593,3 +595,26 @@ This soft deletion approach provides several benefits:
 - Allows for potential recovery of accidentally deleted entries
 - Enables better tracking and statistics
 - Preserves data integrity and relationships 
+
+### Guild Management Commands
+
+#### `/guildadd`
+Add a user to a guild (Admin/Officer only)
+- `user`: The user to add to the guild
+- `guild`: The guild to add the user to
+- `send_welcome`: Send welcome message to user (default: True)
+
+#### `/guildremove`
+Remove a user from a guild (Admin/Officer only)
+- `user`: The user to remove from the guild
+- `guild`: The guild to remove the user from
+- `kick_from_discord`: Also kick the user from Discord (default: False)
+
+#### `/welcomeset`
+Set welcome message for a guild (Admin only)
+- `guild`: The guild to set the welcome message for
+- `message`: The welcome message to send to new members
+
+#### `/welcomeshow`
+Show welcome messages for all guilds (Admin/Officer only)
+- `guild`: Optional: Show message for specific guild only 
