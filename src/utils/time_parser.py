@@ -1,72 +1,106 @@
 """Time parsing utilities."""
 from datetime import datetime, timedelta
-import re
-from zoneinfo import ZoneInfo
+from typing import Tuple
 
-def parse_date(date_str: str) -> datetime:
-    """Parse a date string in format DDMM, DD/MM or DD.MM."""
-    # Remove any separators and get just the numbers
-    date_numbers = re.sub(r'[/.-]', '', date_str)
+def parse_time(time_str: str) -> Tuple[int, int]:
+    """Parse a time string into hour and minute.
     
-    if len(date_numbers) != 4:
-        raise ValueError("Invalid date format. Please use DDMM, DD/MM or DD.MM")
+    Args:
+        time_str: Time string in format HHMM or HH:MM
         
-    try:
-        day = int(date_numbers[:2])
-        month = int(date_numbers[2:])
+    Returns:
+        Tuple of (hour, minute)
         
-        # Get current year
-        current_year = datetime.now(ZoneInfo("Europe/Berlin")).year
-        
-        # Create date object
-        return datetime(current_year, month, day)
-        
-    except ValueError as e:
-        raise ValueError("Invalid date. Please check day and month values.") from e
-
-def parse_time(time_str: str) -> tuple[int, int]:
-    """Parse a time string in format HHMM or HH:MM."""
-    # Remove any separators and get just the numbers
-    time_numbers = time_str.replace(':', '')
+    Raises:
+        ValueError: If time format is invalid
+    """
+    # Remove any separators
+    time_str = time_str.replace(":", "")
     
-    if len(time_numbers) != 4:
+    if not time_str.isdigit() or len(time_str) != 4:
         raise ValueError("Invalid time format. Please use HHMM or HH:MM")
         
-    try:
-        hours = int(time_numbers[:2])
-        minutes = int(time_numbers[2:])
+    hour = int(time_str[:2])
+    minute = int(time_str[2:])
+    
+    # Basic validation
+    if hour < 0 or hour > 23:
+        raise ValueError("Hour must be between 0 and 23")
+    if minute < 0 or minute > 59:
+        raise ValueError("Minute must be between 0 and 59")
         
-        if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
-            raise ValueError
-            
-        return hours, minutes
+    return hour, minute
+
+def parse_date(date_str: str) -> datetime:
+    """Parse a date string into a date object.
+    
+    Args:
+        date_str: Date string in format DDMM, DD/MM or DD.MM
         
-    except ValueError as e:
-        raise ValueError("Invalid time. Please check hours and minutes values.") from e
+    Returns:
+        datetime object with just the date part set (time will be 00:00)
+        
+    Raises:
+        ValueError: If date format is invalid
+    """
+    # Remove any separators
+    date_str = date_str.replace(".", "").replace("/", "")
+    
+    if not date_str.isdigit() or len(date_str) != 4:
+        raise ValueError("Invalid date format. Please use DDMM, DD/MM or DD.MM")
+        
+    day = int(date_str[:2])
+    month = int(date_str[2:])
+    
+    # Basic validation
+    if month < 1 or month > 12:
+        raise ValueError("Month must be between 1 and 12")
+    if day < 1 or day > 31:
+        raise ValueError("Day must be between 1 and 31")
+        
+    # Create date with current year
+    return datetime(year=datetime.utcnow().year, month=month, day=day)
 
 def parse_datetime(date_str: str, time_str: str) -> datetime:
-    """Parse date and time strings into a datetime object."""
-    try:
-        # Parse date and time separately
-        date_obj = parse_date(date_str)
-        hours, minutes = parse_time(time_str)
+    """Parse date and time strings into a datetime object.
+    
+    Args:
+        date_str: Date string in format DDMM, DD/MM or DD.MM
+        time_str: Time string in format HHMM or HH:MM
         
-        # Create datetime in German timezone
-        german_tz = ZoneInfo("Europe/Berlin")
-        dt = datetime(
-            date_obj.year,
-            date_obj.month,
-            date_obj.day,
-            hours,
-            minutes,
-            tzinfo=german_tz
-        )
+    Returns:
+        datetime object
         
-        # Convert to UTC for storage
-        return dt.astimezone(ZoneInfo("UTC"))
+    Raises:
+        ValueError: If date or time format is invalid
+    """
+    # Parse date
+    date = parse_date(date_str)
+    
+    # Parse time
+    hour, minute = parse_time(time_str)
+    
+    # Create datetime object with current year
+    dt = datetime(
+        year=date.year,
+        month=date.month,
+        day=date.day,
+        hour=hour,
+        minute=minute
+    )
+    
+    # Check if the datetime is in the past
+    current_time = datetime.utcnow()
+    if dt < current_time:
+        # If it's within 14 days in the past, it's probably a mistake
+        days_in_past = (current_time - dt).days
+        if days_in_past <= 14:
+            raise ValueError("The start date/time cannot be in the past! Please check your input.")
         
-    except ValueError as e:
-        raise ValueError(f"Error parsing date/time: {str(e)}")
+        # If it's more than 14 days in the past, move it to next year
+        dt = dt.replace(year=dt.year + 1)
+    
+    return dt
 
 def format_duration(duration: timedelta) -> str:
     """Format a timedelta into a human-readable string.

@@ -25,7 +25,6 @@ from src.database.operations import (delete_afk_entries, get_active_afk,
                                    sync_clan_memberships, get_clan_membership_history,
                                    extend_afk)
 from src.utils.time_parser import parse_date, parse_time, parse_datetime
-from src.messages.welcome_messages import get_welcome_message
 
 # Create logs directory if it doesn't exist
 os.makedirs("logs", exist_ok=True)
@@ -50,6 +49,7 @@ ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
 OFFICER_ROLE_ID = int(os.getenv("OFFICER_ROLE_ID", "0"))
 CLAN1_ROLE_ID = int(os.getenv("CLAN1_ROLE_ID", "0"))  # Clan 1
 CLAN2_ROLE_ID = int(os.getenv("CLAN2_ROLE_ID", "0"))  # Clan 2
+BOT_NAME = os.getenv("BOT_NAME", "Requiem Bot")
 
 # Clan Names and Aliases
 CLAN1_NAME = os.getenv("CLAN1_NAME", "Clan 1")
@@ -214,58 +214,6 @@ class RequiemBot(commands.Bot):
             ):
                 await clan_changes(interaction, clan, days)
 
-            @self.tree.command(
-                name="clanadd",
-                description="Add a user to a clan and assign all necessary roles",
-                guild=guild
-            )
-            @app_commands.describe(
-                user="The user to add to the clan",
-                clan="The clan to add the user to (grp9/moon)",
-                send_welcome="Whether to send a welcome message to the user (optional)"
-            )
-            @has_required_role()
-            async def clanadd_command(
-                interaction: discord.Interaction,
-                user: discord.Member,
-                clan: str,
-                send_welcome: bool = True
-            ):
-                await clanadd(interaction, user, clan, send_welcome)
-
-            @self.tree.command(
-                name="showmessage",
-                description="Show the welcome message for a specific clan",
-                guild=guild
-            )
-            @app_commands.describe(
-                clan="The clan to show the message for (grp9/moon)"
-            )
-            @has_required_role()
-            async def showmessage_command(
-                interaction: discord.Interaction,
-                clan: str
-            ):
-                """Show the welcome message for a specific clan."""
-                # Convert clan parameter to full name using environment variables
-                clan = clan.lower()
-                if clan in CLAN1_ALIASES:
-                    clan_name = CLAN1_NAME
-                elif clan in CLAN2_ALIASES:
-                    clan_name = CLAN2_NAME
-                else:
-                    await interaction.response.send_message(
-                        f"❌ Invalid clan. Please use one of: {', '.join(CLAN1_ALIASES + CLAN2_ALIASES)}",
-                        ephemeral=True
-                    )
-                    return
-                
-                # Get the welcome message
-                message = get_welcome_message(clan_name)
-                
-                # Send the message
-                await interaction.response.send_message(f"Welcome message for {clan_name}:\n\n{message}", ephemeral=False)
-
             # Sync the commands
             synced = await self.tree.sync(guild=guild)
             
@@ -366,12 +314,13 @@ class RequiemBot(commands.Bot):
         logging.info(f"Logged in as {self.user} (ID: {self.user.id})")
         logging.info(f"Connected to guild ID: {GUILD_ID}")
         
-        # Update bot username if needed
+        # Update bot name if needed
         try:
-            await self.user.edit(username=os.getenv("BOT_USERNAME", "Requiem Bot"))
-            logging.info(f"Updated bot username to {self.user.name}")
-        except discord.HTTPException as e:
-            logging.error(f"Could not update bot username: {e}")
+            if self.user.name != BOT_NAME:
+                await self.user.edit(username=BOT_NAME)
+                logging.info(f"Updated bot name to: {BOT_NAME}")
+        except Exception as e:
+            logging.error(f"Error updating bot name: {e}")
             
         logging.info("------")
 
@@ -1227,24 +1176,14 @@ async def clan_changes(
                     ephemeral=True
                 )
                 return
-
-            await interaction.response.defer()
             
-            # Create embeds
-            embeds = []
-            current_embed = None
-            field_count = 0
+            # Create embed
+            embed = discord.Embed(
+                title=f"Clan Changes in the Last {days} Days",
+                color=discord.Color.blue()
+            )
             
             for user_obj, membership in changes:
-                # Create new embed if needed
-                if current_embed is None or field_count >= 24:
-                    current_embed = discord.Embed(
-                        title=f"Clan Changes in the Last {days} Days" + (" (Continued)" if embeds else ""),
-                        color=discord.Color.blue()
-                    )
-                    embeds.append(current_embed)
-                    field_count = 0
-                
                 clan_name = (
                     CLAN1_NAME if membership.clan_role_id == str(CLAN1_ROLE_ID) else
                     CLAN2_NAME if membership.clan_role_id == str(CLAN2_ROLE_ID) else
@@ -1256,41 +1195,28 @@ async def clan_changes(
                 
                 if membership.left_at and membership.left_at >= start_date:
                     # Member left during the period
-                    current_embed.add_field(
+                    embed.add_field(
                         name=f"🔴 {user_name} left {clan_name}",
                         value=f"<t:{int(membership.left_at.timestamp())}:f>",
                         inline=False
                     )
-                    field_count += 1
                 
                 if membership.joined_at >= start_date:
                     # Member joined during the period
-                    current_embed.add_field(
+                    embed.add_field(
                         name=f"🟢 {user_name} joined {clan_name}",
                         value=f"<t:{int(membership.joined_at.timestamp())}:f>",
                         inline=False
                     )
-                    field_count += 1
             
-            # Send all embeds
-            for i, embed in enumerate(embeds):
-                if i == 0:
-                    await interaction.followup.send(embed=embed)
-                else:
-                    await interaction.followup.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
     
     except Exception as e:
         logging.error(f"Error showing clan changes: {e}")
-        if not interaction.response.is_done():
-            await interaction.response.send_message(
-                "An error occurred. Please try again later.",
-                ephemeral=True
-            )
-        else:
-            await interaction.followup.send(
-                "An error occurred. Please try again later.",
-                ephemeral=True
-            )
+        await interaction.response.send_message(
+            "An error occurred. Please try again later.",
+            ephemeral=True
+        )
 
 async def afkextend(interaction: discord.Interaction, afk_id: int, hours: int):
     """Extend an existing AFK entry."""
@@ -1327,113 +1253,6 @@ async def afkextend(interaction: discord.Interaction, afk_id: int, hours: int):
         )
     except Exception as e:
         logging.error(f"Error in afkextend command: {e}")
-        await interaction.response.send_message(
-            f"❌ An error occurred: {str(e)}",
-            ephemeral=True
-        )
-
-async def clanadd(
-    interaction: discord.Interaction,
-    user: discord.Member,
-    clan: str,
-    send_welcome: bool = True
-):
-    """Add a user to a clan and assign all necessary roles."""
-    try:
-        clan = clan.lower()
-        
-        # Determine which clan and roles to add
-        if clan in CLAN1_ALIASES:
-            clan_role_id = CLAN1_ROLE_ID
-            clan_name = CLAN1_NAME
-            # Get base and additional roles
-            roles_to_add = [interaction.guild.get_role(CLAN1_ROLE_ID)]
-            additional_roles = os.getenv("CLAN1_ADDITIONAL_ROLES", "").strip()
-            if additional_roles:
-                for role_id in additional_roles.split(","):
-                    role = interaction.guild.get_role(int(role_id.strip()))
-                    if role:
-                        roles_to_add.append(role)
-        elif clan in CLAN2_ALIASES:
-            clan_role_id = CLAN2_ROLE_ID
-            clan_name = CLAN2_NAME
-            # Get base and additional roles
-            roles_to_add = [interaction.guild.get_role(CLAN2_ROLE_ID)]
-            additional_roles = os.getenv("CLAN2_ADDITIONAL_ROLES", "").strip()
-            if additional_roles:
-                for role_id in additional_roles.split(","):
-                    role = interaction.guild.get_role(int(role_id.strip()))
-                    if role:
-                        roles_to_add.append(role)
-        else:
-            await interaction.response.send_message(
-                f"❌ Invalid clan specified. Please use one of: {', '.join(CLAN1_ALIASES + CLAN2_ALIASES)}",
-                ephemeral=True
-            )
-            return
-
-        # Filter out None values (in case a role wasn't found)
-        roles_to_add = [role for role in roles_to_add if role is not None]
-
-        if not roles_to_add:
-            await interaction.response.send_message(
-                "❌ Could not find the required roles to add.",
-                ephemeral=True
-            )
-            return
-
-        # Add roles
-        try:
-            for role in roles_to_add:
-                await user.add_roles(role)
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                "❌ I don't have permission to add roles to this user.",
-                ephemeral=True
-            )
-            return
-        except Exception as e:
-            await interaction.response.send_message(
-                f"❌ An error occurred while adding roles: {str(e)}",
-                ephemeral=True
-            )
-            return
-
-        # Send welcome message if requested
-        if send_welcome:
-            try:
-                welcome_message = get_welcome_message(clan_name)
-                await user.send(welcome_message)
-            except discord.Forbidden:
-                await interaction.response.send_message(
-                    f"✅ Added {user.mention} to {clan_name}, but couldn't send welcome message (DMs disabled).",
-                    ephemeral=True
-                )
-                return
-
-        # Update database
-        with get_db_session() as db:
-            db_user = get_or_create_user(
-                db,
-                str(user.id),
-                user.name,
-                user.display_name,
-                str(clan_role_id)
-            )
-
-        # Create response message with list of added roles
-        role_names = [role.name for role in roles_to_add]
-        response = (
-            f"✅ Successfully added {user.mention} to {clan_name}\n"
-            f"Added roles: {', '.join(role_names)}"
-        )
-        if send_welcome:
-            response += "\nWelcome message sent."
-
-        await interaction.response.send_message(response, ephemeral=False)
-
-    except Exception as e:
-        logging.error(f"Error in clanadd command: {e}")
         await interaction.response.send_message(
             f"❌ An error occurred: {str(e)}",
             ephemeral=True
