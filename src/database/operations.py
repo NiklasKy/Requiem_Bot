@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple, Dict, Any
 from sqlalchemy import and_, or_, func, desc
 from sqlalchemy.orm import Session
 
-from src.database.models import AFKEntry, RaidSignup, User, ClanMembership, GuildWelcomeMessage, RaidHelperEvent, RaidHelperSignup, GuildInfo
+from src.database.models import AFKEntry, RaidSignup, User, ClanMembership, GuildWelcomeMessage, RaidHelperEvent, RaidHelperSignup, GuildInfo, ProcessedEvent
 
 def get_or_create_user(
     db: Session,
@@ -914,3 +914,14 @@ def add_guild_info(db: Session, role_id: str, name: str) -> GuildInfo:
     db.commit()
     db.refresh(guild_info)
     return guild_info 
+
+def mark_event_as_processed(db: Session, event_id: str) -> ProcessedEvent:
+    """Mark an event as processed."""
+    processed_event = ProcessedEvent(event_id=event_id)
+    db.add(processed_event)
+    db.commit()
+    return processed_event
+
+def is_event_processed(db: Session, event_id: str) -> bool:
+    """Check if an event has been processed."""
+    return db.query(ProcessedEvent).filter(ProcessedEvent.event_id == event_id).first() is not None 

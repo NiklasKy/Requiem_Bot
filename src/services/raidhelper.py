@@ -7,7 +7,7 @@ from datetime import datetime
 import asyncio
 
 from src.database.connection import get_db_session
-from src.database.operations import create_or_update_raidhelper_event, update_raidhelper_signups, get_active_raidhelper_events
+from src.database.operations import create_or_update_raidhelper_event, update_raidhelper_signups, get_active_raidhelper_events, mark_event_as_processed, is_event_processed
 from src.database.models import RaidHelperEvent, RaidHelperSignup
 from src.services.google_sheets import GoogleSheetsService
 
@@ -152,8 +152,8 @@ class RaidHelperService:
             
             for event in events:
                 try:
-                    # Überspringe bereits verarbeitete Events
-                    if event.id in self.processed_events:
+                    # Überprüfe, ob das Event bereits verarbeitet wurde
+                    if is_event_processed(db, event.id):
                         continue
                     
                     # Überprüfe, ob das Event abgeschlossen ist
@@ -174,7 +174,7 @@ class RaidHelperService:
                             logging.info(f"Successfully sent {len(rows)} entries to Google Sheets for event {event.id}")
                             
                             # Markiere das Event als verarbeitet
-                            self.processed_events.add(event.id)
+                            mark_event_as_processed(db, event.id)
                         else:
                             logging.warning(f"No signups found for closed event {event.id}")
                             

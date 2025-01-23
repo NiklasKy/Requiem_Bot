@@ -88,6 +88,13 @@ class GuildWelcomeMessage(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class ProcessedEvent(Base):
+    """Model for tracking processed events."""
+    __tablename__ = "processed_events"
+
+    event_id = Column(String(20), primary_key=True)
+    processed_at = Column(DateTime, default=datetime.utcnow)
+
 class RaidHelperEvent(Base):
     """Model for storing RaidHelper events."""
     __tablename__ = "raidhelper_events"
