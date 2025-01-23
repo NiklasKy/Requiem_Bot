@@ -166,28 +166,11 @@ class RaidHelperService:
                         ).all()
                         
                         if signups:
-                            # Konvertiere Event und Signups in das richtige Format
-                            event_data = {
-                                "id": event.id,
-                                "title": event.title,
-                                "closeTime": int(event.close_time.timestamp())
-                            }
-                            
-                            signup_data = [{
-                                "user_id": signup.user_id,
-                                "user_name": signup.user_name,
-                                "status": signup.status
-                            } for signup in signups]
-                            
                             # Formatiere die Daten für Google Sheets
-                            rows = self.sheets_service.format_event_data(
-                                event_data,
-                                signup_data,
-                                self.guild_names
-                            )
+                            rows = self.sheets_service.format_event_data(event, signups)
                             
                             # Sende die Daten an Google Sheets
-                            self.sheets_service.append_rows("Sheet1!A:G", rows)
+                            self.sheets_service.append_rows("Sheet1!A:H", rows)
                             logging.info(f"Successfully sent {len(rows)} entries to Google Sheets for event {event.id}")
                             
                             # Markiere das Event als verarbeitet
