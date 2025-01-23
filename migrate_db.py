@@ -5,13 +5,18 @@ from datetime import datetime
 import os
 
 from sqlalchemy import create_engine, select, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 from dotenv import load_dotenv
 
-from src.database.models import Base, User, AFKEntry
+from src.database.models import Base, User, AFKEntry, GuildInfo
+from src.database.connection import DATABASE_URL
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -175,5 +180,53 @@ def migrate_data():
         logger.error(f"Error during migration: {e}")
         raise
 
+def migrate():
+    """Create all database tables."""
+    logging.info("Starting database migration...")
+    try:
+        engine = create_engine(DATABASE_URL)
+        Base.metadata.create_all(engine)
+        logging.info("Database tables created successfully")
+        
+        # Migrate guild information
+        migrate_guild_info(engine)
+        
+    except Exception as e:
+        logging.error(f"Error during migration: {e}")
+        raise
+
+def migrate_guild_info(engine):
+    """Migrate guild information from environment variables to database."""
+    logging.info("Migrating guild information...")
+    try:
+        with Session(engine) as session:
+            # Check if guild info already exists
+            if session.query(GuildInfo).count() > 0:
+                logging.info("Guild information already exists in database")
+                return
+
+            # Get guild information from environment variables
+            guild_roles = {
+                "GUILD_ROLE_ID_REQUIEM": ("Requiem", os.getenv("GUILD_ROLE_ID_REQUIEM")),
+                "GUILD_ROLE_ID_REQUIEM_RISING": ("Requiem Rising", os.getenv("GUILD_ROLE_ID_REQUIEM_RISING")),
+                "GUILD_ROLE_ID_REQUIEM_DAWN": ("Requiem Dawn", os.getenv("GUILD_ROLE_ID_REQUIEM_DAWN")),
+                "GUILD_ROLE_ID_REQUIEM_HOPE": ("Requiem Hope", os.getenv("GUILD_ROLE_ID_REQUIEM_HOPE")),
+            }
+
+            # Add guild information to database
+            for env_key, (name, role_id) in guild_roles.items():
+                if role_id:
+                    guild_info = GuildInfo(role_id=role_id, name=name)
+                    session.add(guild_info)
+                else:
+                    logging.warning(f"Missing role ID for guild {name} ({env_key})")
+
+            session.commit()
+            logging.info("Guild information migrated successfully")
+
+    except Exception as e:
+        logging.error(f"Error migrating guild information: {e}")
+        raise
+
 if __name__ == "__main__":
-    migrate_data() 
+    migrate() 

@@ -65,3 +65,4 @@ Thumbs.db     # Windows
 # SSL certificates
 /ssl/
 *.pem 
+credentials.json

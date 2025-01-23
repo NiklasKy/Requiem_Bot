@@ -1,12 +1,12 @@
 """Database operations for the application."""
 import logging
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 
-from sqlalchemy import and_, or_, func
+from sqlalchemy import and_, or_, func, desc
 from sqlalchemy.orm import Session
 
-from src.database.models import AFKEntry, RaidSignup, User, ClanMembership, GuildWelcomeMessage
+from src.database.models import AFKEntry, RaidSignup, User, ClanMembership, GuildWelcomeMessage, RaidHelperEvent, RaidHelperSignup
 
 def get_or_create_user(
     db: Session,
@@ -821,3 +821,82 @@ def remove_user_from_guild(
     db.commit()
     db.refresh(membership)
     return membership 
+
+def create_or_update_raidhelper_event(db: Session, event_data: Dict[str, Any]) -> RaidHelperEvent:
+    """Create or update a RaidHelper event."""
+    event = db.query(RaidHelperEvent).filter(RaidHelperEvent.id == event_data["id"]).first()
+    
+    if not event:
+        event = RaidHelperEvent(
+            id=event_data["id"],
+            title=event_data["title"],
+            description=event_data.get("description"),
+            leader_id=event_data["leaderId"],
+            leader_name=event_data["leaderName"],
+            channel_id=event_data["channelId"],
+            channel_name=event_data.get("channelName"),
+            start_time=datetime.fromtimestamp(int(event_data["startTime"])),
+            end_time=datetime.fromtimestamp(int(event_data["endTime"])) if event_data.get("endTime") else None,
+            close_time=datetime.fromtimestamp(int(event_data["closeTime"])) if event_data.get("closeTime") else None,
+            last_updated=datetime.fromtimestamp(int(event_data["lastUpdated"])) if event_data.get("lastUpdated") else None,
+            template_id=event_data.get("templateId"),
+            signup_count=int(event_data.get("signUpCount", 0))
+        )
+        db.add(event)
+    else:
+        # Update existing event
+        event.title = event_data["title"]
+        event.description = event_data.get("description")
+        event.leader_id = event_data["leaderId"]
+        event.leader_name = event_data["leaderName"]
+        event.channel_id = event_data["channelId"]
+        event.channel_name = event_data.get("channelName")
+        event.start_time = datetime.fromtimestamp(int(event_data["startTime"]))
+        event.end_time = datetime.fromtimestamp(int(event_data["endTime"])) if event_data.get("endTime") else None
+        event.close_time = datetime.fromtimestamp(int(event_data["closeTime"])) if event_data.get("closeTime") else None
+        event.last_updated = datetime.fromtimestamp(int(event_data["lastUpdated"])) if event_data.get("lastUpdated") else None
+        event.template_id = event_data.get("templateId")
+        event.signup_count = int(event_data.get("signUpCount", 0))
+    
+    db.commit()
+    return event
+
+def update_raidhelper_signups(db: Session, event_id: str, signups_data: List[Dict[str, Any]]) -> List[RaidHelperSignup]:
+    """Update signups for a RaidHelper event."""
+    # Delete existing signups for this event
+    db.query(RaidHelperSignup).filter(RaidHelperSignup.event_id == event_id).delete()
+    
+    # Create new signups
+    signups = []
+    for signup_data in signups_data:
+        signup = RaidHelperSignup(
+            event_id=event_id,
+            user_id=signup_data["userId"],
+            user_name=signup_data["name"],
+            entry_time=datetime.fromtimestamp(int(signup_data["entryTime"])),
+            status=signup_data["status"],
+            class_name=signup_data.get("className"),
+            spec_name=signup_data.get("specName"),
+            position=signup_data.get("position")
+        )
+        db.add(signup)
+        signups.append(signup)
+    
+    db.commit()
+    return signups
+
+def get_active_raidhelper_events(db: Session) -> List[RaidHelperEvent]:
+    """Get all active RaidHelper events (where close_time is in the future)."""
+    current_time = datetime.utcnow()
+    return db.query(RaidHelperEvent)\
+        .filter(RaidHelperEvent.close_time > current_time)\
+        .order_by(RaidHelperEvent.start_time)\
+        .all()
+
+def get_user_event_history(db: Session, user_id: str, limit: int = 10) -> List[RaidHelperSignup]:
+    """Get event history for a specific user."""
+    return db.query(RaidHelperSignup)\
+        .filter(RaidHelperSignup.user_id == user_id)\
+        .order_by(desc(RaidHelperSignup.entry_time))\
+        .limit(limit)\
+        .all() 

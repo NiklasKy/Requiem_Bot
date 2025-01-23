@@ -15,7 +15,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy import and_, or_
 
 from src.database.connection import get_db_session, init_db
-from src.database.models import AFKEntry
+from src.database.models import AFKEntry, RaidHelperEvent, RaidHelperSignup
 from src.database.operations import (delete_afk_entries, get_active_afk,
                                    get_afk_statistics, get_clan_members,
                                    get_or_create_user, get_user_afk_history,
@@ -24,8 +24,10 @@ from src.database.operations import (delete_afk_entries, get_active_afk,
                                    get_clan_active_and_future_afk, remove_future_afk,
                                    sync_clan_memberships, get_clan_membership_history,
                                    extend_afk, set_guild_welcome_message, get_guild_welcome_message,
-                                   add_user_to_guild, get_all_welcome_messages, remove_user_from_guild)
+                                   add_user_to_guild, get_all_welcome_messages, remove_user_from_guild,
+                                   get_user_event_history)
 from src.utils.time_parser import parse_date, parse_time, parse_datetime
+from src.services.raidhelper import RaidHelperService
 
 # Create logs directory if it doesn't exist
 os.makedirs("logs", exist_ok=True)
@@ -72,6 +74,7 @@ class RequiemBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
+        self.raidhelper = RaidHelperService()
 
     async def setup_hook(self):
         """Set up the bot."""
@@ -92,6 +95,8 @@ class RequiemBot(commands.Bot):
             # Start background tasks
             self.sync_clan_memberships.start()
             self.update_afk_status.start()
+            # Start RaidHelper sync task as background task
+            self.bg_task = self.loop.create_task(self.raidhelper.start_sync_task())
 
             logging.info("Starting to sync commands...")
             
@@ -288,6 +293,14 @@ class RequiemBot(commands.Bot):
                 kick_from_discord: bool = False
             ):
                 await guildremove(interaction, user, guild, kick_from_discord)
+
+            @self.tree.command(name="eventhistory", description="Zeigt die Event-Historie eines Benutzers", guild=guild)
+            @app_commands.describe(
+                user="Der Benutzer, dessen Historie angezeigt werden soll",
+                limit="Anzahl der anzuzeigenden Events (Standard: 10)"
+            )
+            async def eventhistory_command(interaction: discord.Interaction, user: discord.Member, limit: int = 10):
+                await eventhistory(interaction, user, limit)
 
             # Sync the commands
             synced = await self.tree.sync(guild=guild)
@@ -1697,6 +1710,38 @@ async def guildremove(
             f"❌ An error occurred: {str(e)}",
             ephemeral=True
         )
+
+async def eventhistory(interaction: discord.Interaction, user: discord.Member, limit: int = 10):
+    """Show event history for a user."""
+    await interaction.response.defer()
+
+    with get_db_session() as db:
+        history = get_user_event_history(db, str(user.id), limit)
+        
+        if not history:
+            await interaction.followup.send(f"{user.display_name} hat noch an keinen Events teilgenommen.")
+            return
+        
+        # Create embed
+        embed = discord.Embed(
+            title=f"Event Historie für {user.display_name}",
+            color=discord.Color.blue()
+        )
+        
+        for signup in history:
+            event = signup.event
+            value = f"Status: {signup.status}\n"
+            value += f"Klasse: {signup.class_name or 'N/A'}\n"
+            value += f"Spec: {signup.spec_name or 'N/A'}\n"
+            value += f"Position: {signup.position or 'N/A'}"
+            
+            embed.add_field(
+                name=f"{event.title} ({event.start_time.strftime('%d.%m.%Y %H:%M')})",
+                value=value,
+                inline=False
+            )
+        
+        await interaction.followup.send(embed=embed)
 
 def run_bot():
     """Run the bot."""
