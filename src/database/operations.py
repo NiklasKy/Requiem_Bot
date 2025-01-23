@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple, Dict, Any
 from sqlalchemy import and_, or_, func, desc
 from sqlalchemy.orm import Session
 
-from src.database.models import AFKEntry, RaidSignup, User, ClanMembership, GuildWelcomeMessage, RaidHelperEvent, RaidHelperSignup
+from src.database.models import AFKEntry, RaidSignup, User, ClanMembership, GuildWelcomeMessage, RaidHelperEvent, RaidHelperSignup, GuildInfo
 
 def get_or_create_user(
     db: Session,
@@ -899,4 +899,18 @@ def get_user_event_history(db: Session, user_id: str, limit: int = 10) -> List[R
         .filter(RaidHelperSignup.user_id == user_id)\
         .order_by(desc(RaidHelperSignup.entry_time))\
         .limit(limit)\
-        .all() 
+        .all()
+
+def add_guild_info(db: Session, role_id: str, name: str) -> GuildInfo:
+    """Add or update guild information in the database."""
+    guild_info = db.query(GuildInfo).filter(GuildInfo.role_id == role_id).first()
+    
+    if guild_info:
+        guild_info.name = name
+    else:
+        guild_info = GuildInfo(role_id=role_id, name=name)
+        db.add(guild_info)
+    
+    db.commit()
+    db.refresh(guild_info)
+    return guild_info 

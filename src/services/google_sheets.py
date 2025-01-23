@@ -149,15 +149,21 @@ class GoogleSheetsService:
                 info.role_id: info.name 
                 for info in session.query(GuildInfo).all()
             }
+            logging.debug(f"Loaded guild info map: {guild_info_map}")
             
             for signup in signups:
                 # Get user from database
                 user = session.query(User).filter(User.discord_id == str(signup.user_id)).first()
+                logging.debug(f"Looking up user {signup.user_name} (ID: {signup.user_id})")
+                logging.debug(f"Found user in DB: {user.username if user else 'Not found'}")
+                if user:
+                    logging.debug(f"User clan_role_id: {user.clan_role_id}")
                 
                 # Get guild name from map, or "Unknown" if not found
                 guild_name = "Unknown"
-                if user and user.clan_role_id and user.clan_role_id in guild_info_map:
-                    guild_name = guild_info_map[user.clan_role_id]
+                if user and user.clan_role_id:
+                    guild_name = guild_info_map.get(user.clan_role_id, "Unknown")
+                    logging.debug(f"Found guild name: {guild_name} for role_id: {user.clan_role_id}")
                 
                 row = [
                     event.end_time.strftime("%Y-%m-%d"),   # Date
@@ -170,5 +176,6 @@ class GoogleSheetsService:
                     signup.class_name                      # Status (Class Name)
                 ]
                 rows.append(row)
+                logging.debug(f"Added row for {signup.user_name}: {row}")
         
         return rows 
