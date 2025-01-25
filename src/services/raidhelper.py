@@ -150,7 +150,7 @@ class RaidHelperService:
                                     user_id=str(user.discord_id),
                                     user_name=user.username or "Unknown",
                                     entry_time=current_time,
-                                    class_name="No Info",
+                                    class_name="No signup",
                                     spec_name="",
                                     status="",
                                     position=0

@@ -924,7 +924,7 @@ def update_raidhelper_signups(db: Session, event_id: str, signups_data: List[Dic
     
     # Remove signups that no longer exist in RaidHelper
     for user_id, signup in existing_signups.items():
-        if user_id not in processed_user_ids and signup.class_name != "No Info":
+        if user_id not in processed_user_ids and signup.class_name != "No signup":
             db.delete(signup)
             logging.info(f"Removed signup for user {user_id} from event {event_id}")
     

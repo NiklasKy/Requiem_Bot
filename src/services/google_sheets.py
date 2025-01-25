@@ -215,10 +215,10 @@ class GoogleSheetsService:
                 status = signup.class_name
                 if signup.class_name in ["DPS", "Tank", "Healer", "Dps"]:
                     status = "Present"
-                elif signup.class_name == "No Info":
-                    status = "No Info"
+                elif signup.class_name == "No signup":
+                    status = "No signup"
                 elif signup.class_name == "":
-                    status = signup.class_name or "No Info"
+                    status = signup.class_name or "No signup"
                 else:
                     # Behalte den originalen Status bei (z.B. "Absence", "Bench", etc.)
                     status = signup.class_name
