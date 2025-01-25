@@ -8,7 +8,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from src.database.connection import get_db_session
-from src.database.models import User, GuildInfo
+from src.database.models import User, GuildInfo, AFKEntry
 
 class GoogleSheetsService:
     """Service for interacting with Google Sheets."""
@@ -17,7 +17,10 @@ class GoogleSheetsService:
         """Initialize the Google Sheets service."""
         self.spreadsheet_id = os.getenv("GOOGLE_SHEET_ID")
         self.sheet_name = "Activity Check"
-        self.headers = ["Date", "Time", "Event ID", "Title", "Guild", "User Name", "Discord ID", "Status"]
+        self.headers = [
+            "Date", "Time", "Event ID", "Title", "Guild", 
+            "User Name", "Discord ID", "Status", "AFK Status"  # Added AFK Status column
+        ]
         credentials_path = "credentials.json"
         
         # Setup Google Sheets API
@@ -35,72 +38,77 @@ class GoogleSheetsService:
             raise
     
     def ensure_sheet_exists(self):
-        """Überprüft, ob das Sheet existiert und erstellt es bei Bedarf."""
+        """Check if the sheet exists and create it if it doesn't."""
         try:
-            # Hole alle Sheets im Spreadsheet
-            spreadsheet = self.service.spreadsheets().get(
+            # Try to get the sheet to check if it exists
+            sheet = self.service.spreadsheets().get(
                 spreadsheetId=self.spreadsheet_id
             ).execute()
             
-            # Überprüfe, ob unser Sheet bereits existiert
-            sheet_exists = False
-            for sheet in spreadsheet.get('sheets', []):
-                if sheet.get('properties', {}).get('title') == self.sheet_name:
-                    sheet_exists = True
-                    break
+            # Check if our sheet name exists
+            sheet_exists = any(s['properties']['title'] == self.sheet_name for s in sheet['sheets'])
             
             if not sheet_exists:
-                # Erstelle ein neues Sheet
-                requests = [{
-                    'addSheet': {
-                        'properties': {
-                            'title': self.sheet_name
+                # Create new sheet
+                body = {
+                    'requests': [{
+                        'addSheet': {
+                            'properties': {
+                                'title': self.sheet_name
+                            }
                         }
-                    }
-                }]
-                
+                    }]
+                }
                 self.service.spreadsheets().batchUpdate(
                     spreadsheetId=self.spreadsheet_id,
-                    body={'requests': requests}
+                    body=body
                 ).execute()
+                logging.info(f"Sheet '{self.sheet_name}' created")
                 
-                # Füge die Spaltenüberschriften hinzu
-                range_name = f"{self.sheet_name}!A1:H1"
+                # Add headers
+                range_name = f"{self.sheet_name}!A1:I1"
+                body = {
+                    'values': [self.headers]
+                }
+                # Make headers bold
+                format_request = {
+                    'requests': [{
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': self._get_sheet_id(),
+                                'startRowIndex': 0,
+                                'endRowIndex': 1,
+                                'startColumnIndex': 0,
+                                'endColumnIndex': len(self.headers)
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'textFormat': {
+                                        'bold': True
+                                    }
+                                }
+                            },
+                            'fields': 'userEnteredFormat.textFormat.bold'
+                        }
+                    }]
+                }
+                
+                # Update values and format
                 self.service.spreadsheets().values().update(
                     spreadsheetId=self.spreadsheet_id,
                     range=range_name,
                     valueInputOption='RAW',
-                    body={'values': [self.headers]}
+                    body=body
                 ).execute()
-                
-                # Formatiere die Überschriften (fett)
-                requests = [{
-                    'repeatCell': {
-                        'range': {
-                            'sheetId': self._get_sheet_id(),
-                            'startRowIndex': 0,
-                            'endRowIndex': 1
-                        },
-                        'cell': {
-                            'userEnteredFormat': {
-                                'textFormat': {'bold': True}
-                            }
-                        },
-                        'fields': 'userEnteredFormat.textFormat.bold'
-                    }
-                }]
-                
                 self.service.spreadsheets().batchUpdate(
                     spreadsheetId=self.spreadsheet_id,
-                    body={'requests': requests}
+                    body=format_request
                 ).execute()
-                
-                logging.info(f"Created new sheet '{self.sheet_name}' with headers")
             else:
                 logging.info(f"Sheet '{self.sheet_name}' already exists")
                 
-        except Exception as e:
-            logging.error(f"Error ensuring sheet exists: {e}")
+        except HttpError as error:
+            logging.error(f"Failed to ensure sheet exists: {error}")
             raise
     
     def _get_sheet_id(self) -> int:
@@ -131,6 +139,42 @@ class GoogleSheetsService:
                 insertDataOption='INSERT_ROWS',
                 body=body
             ).execute()
+
+            # Get the range of the newly inserted rows
+            updated_range = result.get('updates', {}).get('updatedRange', '')
+            if updated_range:
+                # Extract the row numbers from the range (e.g., "Sheet1!A2:H5" -> 2,5)
+                start_row = int(''.join(filter(str.isdigit, updated_range.split(':')[0])))
+                end_row = int(''.join(filter(str.isdigit, updated_range.split(':')[1])))
+
+                # Apply normal (non-bold) formatting to the inserted rows
+                format_request = {
+                    'requests': [{
+                        'repeatCell': {
+                            'range': {
+                                'sheetId': self._get_sheet_id(),
+                                'startRowIndex': start_row - 1,  # Convert to 0-based index
+                                'endRowIndex': end_row,
+                                'startColumnIndex': 0,
+                                'endColumnIndex': len(self.headers)
+                            },
+                            'cell': {
+                                'userEnteredFormat': {
+                                    'textFormat': {
+                                        'bold': False
+                                    }
+                                }
+                            },
+                            'fields': 'userEnteredFormat.textFormat.bold'
+                        }
+                    }]
+                }
+
+                # Apply the formatting
+                self.service.spreadsheets().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body=format_request
+                ).execute()
             
             rows_appended = result.get('updates', {}).get('updatedRows', 0)
             logging.info(f"Successfully appended {rows_appended} rows to Google Sheet")
@@ -165,6 +209,27 @@ class GoogleSheetsService:
                     guild_name = guild_info_map.get(user.clan_role_id, "Unknown")
                     logging.debug(f"Found guild name: {guild_name} for role_id: {user.clan_role_id}")
                 
+                # Convert specific class_names to "Present"
+                status = signup.class_name
+                if status in ["DPS", "Tank", "Healer"]:
+                    status = "Present"
+                
+                # Check for AFK status
+                afk_status = "-"  # Default to "-" instead of "Not AFK"
+                if user:
+                    afk_entry = (
+                        session.query(AFKEntry)
+                        .filter(
+                            AFKEntry.user_id == user.id,
+                            AFKEntry.start_date <= event.end_time,
+                            AFKEntry.end_date >= event.end_time,
+                            AFKEntry.is_active == True
+                        )
+                        .first()
+                    )
+                    if afk_entry:
+                        afk_status = f"AFK: {afk_entry.reason}"
+                
                 row = [
                     event.end_time.strftime("%Y-%m-%d"),   # Date
                     event.end_time.strftime("%H:%M"),      # Time
@@ -173,7 +238,8 @@ class GoogleSheetsService:
                     guild_name,                            # Guild
                     signup.user_name,                      # User Name
                     str(signup.user_id),                   # Discord ID
-                    signup.class_name                      # Status (Class Name)
+                    status,                                # Status
+                    afk_status                            # AFK Status
                 ]
                 rows.append(row)
                 logging.debug(f"Added row for {signup.user_name}: {row}")

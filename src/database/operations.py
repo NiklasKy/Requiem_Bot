@@ -863,24 +863,70 @@ def create_or_update_raidhelper_event(db: Session, event_data: Dict[str, Any]) -
 
 def update_raidhelper_signups(db: Session, event_id: str, signups_data: List[Dict[str, Any]]) -> List[RaidHelperSignup]:
     """Update signups for a RaidHelper event."""
-    # Delete existing signups for this event
-    db.query(RaidHelperSignup).filter(RaidHelperSignup.event_id == event_id).delete()
+    # Get existing signups for this event
+    existing_signups = {
+        signup.user_id: signup 
+        for signup in db.query(RaidHelperSignup).filter(RaidHelperSignup.event_id == event_id).all()
+    }
     
-    # Create new signups
+    # Track processed user IDs
+    processed_user_ids = set()
+    
+    # Update or create signups
     signups = []
     for signup_data in signups_data:
-        signup = RaidHelperSignup(
-            event_id=event_id,
-            user_id=signup_data["userId"],
-            user_name=signup_data["name"],
-            entry_time=datetime.fromtimestamp(int(signup_data["entryTime"])),
-            status=signup_data["status"],
-            class_name=signup_data.get("className"),
-            spec_name=signup_data.get("specName"),
-            position=signup_data.get("position")
-        )
-        db.add(signup)
+        user_id = signup_data["userId"]
+        processed_user_ids.add(user_id)
+        
+        if user_id in existing_signups:
+            # Update existing signup if values have changed
+            signup = existing_signups[user_id]
+            has_changes = False
+            
+            # Check each field for changes
+            if signup.user_name != signup_data["name"]:
+                signup.user_name = signup_data["name"]
+                has_changes = True
+            if signup.status != signup_data["status"]:
+                signup.status = signup_data["status"]
+                has_changes = True
+            if signup.class_name != signup_data.get("className"):
+                signup.class_name = signup_data.get("className")
+                has_changes = True
+            if signup.spec_name != signup_data.get("specName"):
+                signup.spec_name = signup_data.get("specName")
+                has_changes = True
+            if signup.position != signup_data.get("position"):
+                signup.position = signup_data.get("position")
+                has_changes = True
+            
+            # Update entry_time only if other changes were made
+            if has_changes:
+                signup.entry_time = datetime.fromtimestamp(int(signup_data["entryTime"]))
+                signup.updated_at = datetime.utcnow()
+                logging.info(f"Updated signup for user {user_id} in event {event_id}")
+        else:
+            # Create new signup
+            signup = RaidHelperSignup(
+                event_id=event_id,
+                user_id=user_id,
+                user_name=signup_data["name"],
+                entry_time=datetime.fromtimestamp(int(signup_data["entryTime"])),
+                status=signup_data["status"],
+                class_name=signup_data.get("className"),
+                spec_name=signup_data.get("specName"),
+                position=signup_data.get("position")
+            )
+            db.add(signup)
+            logging.info(f"Created new signup for user {user_id} in event {event_id}")
+        
         signups.append(signup)
+    
+    # Remove signups that no longer exist in RaidHelper
+    for user_id, signup in existing_signups.items():
+        if user_id not in processed_user_ids and signup.class_name != "No Info":
+            db.delete(signup)
+            logging.info(f"Removed signup for user {user_id} from event {event_id}")
     
     db.commit()
     return signups

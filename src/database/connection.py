@@ -2,6 +2,11 @@
 import os
 import time
 from typing import Generator
+from contextlib import contextmanager
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -9,14 +14,14 @@ from sqlalchemy.pool import QueuePool
 
 from src.database.models import Base
 
-# Get database configuration from environment variables
-DB_HOST = os.getenv("DB_HOST", "db")
+# Get database connection details from environment variables
+DB_HOST = os.getenv("DB_HOST")  # Use value from .env file
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "requiem_bot")
 DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres")
 
-# Create database URL
+# Construct database URL
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 def wait_for_db(retries: int = 5, delay: int = 5) -> None:
@@ -41,15 +46,8 @@ def wait_for_db(retries: int = 5, delay: int = 5) -> None:
             else:
                 raise Exception("Could not connect to database after multiple retries")
 
-# Create engine with connection pooling
-engine = create_engine(
-    DATABASE_URL,
-    poolclass=QueuePool,
-    pool_size=5,
-    max_overflow=10,
-    pool_timeout=30,
-    pool_pre_ping=True
-)
+# Create database engine
+engine = create_engine(DATABASE_URL)
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -59,8 +57,21 @@ def init_db() -> None:
     wait_for_db()
     Base.metadata.create_all(bind=engine)
 
+@contextmanager
+def get_db_session() -> Session:
+    """Get a database session."""
+    session = SessionLocal()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
 def get_db() -> Generator[Session, None, None]:
-    """Get a database session.
+    """Get a database session for FastAPI dependency injection.
     
     Yields:
         Session: Database session
@@ -69,12 +80,4 @@ def get_db() -> Generator[Session, None, None]:
     try:
         yield db
     finally:
-        db.close()
-
-def get_db_session() -> Session:
-    """Get a new database session.
-    
-    Returns:
-        Session: Database session
-    """
-    return SessionLocal() 
+        db.close() 

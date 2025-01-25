@@ -6,9 +6,9 @@ import aiohttp
 from datetime import datetime
 import asyncio
 
-from src.database.connection import get_db_session
+from src.database.connection import get_db_session, SessionLocal
 from src.database.operations import create_or_update_raidhelper_event, update_raidhelper_signups, get_active_raidhelper_events, mark_event_as_processed, is_event_processed
-from src.database.models import RaidHelperEvent, RaidHelperSignup
+from src.database.models import RaidHelperEvent, RaidHelperSignup, User, GuildInfo
 from src.services.google_sheets import GoogleSheetsService
 
 class RaidHelperService:
@@ -25,6 +25,7 @@ class RaidHelperService:
             "Content-Type": "application/json"
         }
         self.sheets_service = GoogleSheetsService()
+        self.session_lock = asyncio.Lock()  # Initialize the session lock
         self.processed_events = set()  # Speichert bereits verarbeitete Event-IDs
         self.guild_names = {
             os.getenv("CLAN1_ROLE_ID"): os.getenv("CLAN1_NAME", "Gruppe 9"),
@@ -63,97 +64,200 @@ class RaidHelperService:
     async def fetch_event_details(self, event_id: str) -> Optional[Dict]:
         """Fetch details for a specific event."""
         url = f"{self.base_url}/v2/events/{event_id}"
-        logging.info(f"Fetching event details from: {url}")
+        max_retries = 3
+        base_delay = 0.5  # 500ms base delay between requests
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=self.headers) as response:
-                if response.status == 200:
-                    event_details = await response.json()
-                    logging.info(f"Successfully fetched details for event {event_id}")
-                    return event_details
-                else:
-                    logging.error(f"Failed to fetch event details: {response.status}")
-                    try:
-                        error_text = await response.text()
-                        logging.error(f"Error response: {error_text}")
-                    except:
-                        pass
-                    return None
-
-    async def sync_active_events(self):
-        """Sync all active events and their signups to the database."""
-        logging.info("Starting event sync")
-        events = await self.fetch_server_events()
-        current_time = datetime.utcnow().timestamp()
-        
-        if not events:
-            logging.warning("No events fetched from API")
-            return
-            
-        logging.info(f"Processing {len(events)} events")
-        with get_db_session() as db:
-            for event_data in events:
-                try:
-                    # Debug-Log für event_data
-                    logging.debug(f"Processing event data: {event_data}")
-                    
-                    # Sicherstellen, dass event_data ein Dictionary ist
-                    if isinstance(event_data, str):
-                        event_data = {"id": event_data}  # Minimales Dict erstellen
-                        logging.warning(f"Event data was string, converted to dict: {event_data}")
-                        continue  # Dieses Event überspringen
-                    
-                    # Sicheres Abrufen der closeTime mit Fallback
-                    close_time = event_data.get("closeTime", 0)
-                    if isinstance(close_time, str):
-                        try:
-                            close_time = int(close_time)
-                        except ValueError:
-                            close_time = 0
-                            logging.warning(f"Could not convert closeTime to int: {event_data.get('closeTime')}")
-                    
-                    if close_time < current_time:
-                        logging.debug(f"Skipping closed event {event_data.get('id')}")
-                        continue
-                    
-                    logging.info(f"Processing event: {event_data.get('title', 'No title')} (ID: {event_data.get('id', 'No ID')})")
-                    
-                    try:
-                        # Create or update the event
-                        event = create_or_update_raidhelper_event(db, event_data)
-                        logging.info(f"Successfully created/updated event {event.id}: {event.title}")
-                        
-                        # Fetch and update signups
-                        event_details = await self.fetch_event_details(event.id)
-                        if event_details and "signUps" in event_details:
-                            signups = update_raidhelper_signups(db, event.id, event_details["signUps"])
-                            logging.info(f"Updated {len(signups)} signups for event {event.id}")
+        for attempt in range(max_retries):
+            try:
+                # Add delay between requests to respect rate limits
+                await asyncio.sleep(base_delay * (attempt + 1))
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, headers=self.headers) as response:
+                        if response.status == 200:
+                            event_details = await response.json()
+                            logging.info(f"Successfully fetched details for event {event_id}")
+                            return event_details
+                        elif response.status == 429:  # Rate limit hit
+                            error_data = await response.json()
+                            retry_after = int(error_data.get("reason", "").split("Try again in ")[1].split(" ")[0])
+                            logging.warning(f"Rate limit hit, waiting {retry_after} seconds")
+                            await asyncio.sleep(retry_after)
+                            continue
                         else:
-                            logging.warning(f"No signup data found for event {event.id}")
-                    except Exception as e:
-                        logging.error(f"Database error for event {event_data.get('id')}: {str(e)}")
-                        continue
-                        
-                except Exception as e:
-                    logging.error(f"Error processing event: {str(e)}")
-                    logging.error(f"Event data that caused error: {event_data}")
-                    continue  # Mit dem nächsten Event fortfahren
+                            logging.error(f"Failed to fetch event details: {response.status}")
+                            try:
+                                error_text = await response.text()
+                                logging.error(f"Error response: {error_text}")
+                            except:
+                                pass
+                            if attempt < max_retries - 1:
+                                continue
+                            return None
+                            
+            except Exception as e:
+                logging.error(f"Error fetching event details: {e}")
+                if attempt < max_retries - 1:
+                    continue
+                return None
+        
+        return None
+
+    async def create_default_signups(self, event: RaidHelperEvent, session) -> None:
+        """Create default 'No Info' signups for guild members when event starts."""
+        try:
+            # Extract guild name from event title
+            event_title_lower = event.title.lower()
+            current_time = datetime.utcnow()
             
-            logging.info("Event sync completed")
+            # Get existing signups for this event once
+            existing_signups = {
+                signup.user_id 
+                for signup in session.query(RaidHelperSignup).filter(
+                    RaidHelperSignup.event_id == str(event.id)
+                ).all()
+            }
+            
+            for guild in session.query(GuildInfo).all():
+                guild_name_parts = guild.name.lower().split()
+                
+                # Check if any part of the guild name is in the event title
+                if any(part in event_title_lower for part in guild_name_parts):
+                    logging.info(f"Found guild {guild.name} in event title {event.title} (partial match)")
+                    
+                    # Get all users with this guild role
+                    guild_members = session.query(User).filter(
+                        User.clan_role_id == guild.role_id
+                    ).all()
+                    
+                    logging.info(f"Found {len(guild_members)} members in guild {guild.name}")
+                    
+                    # Create default signups for members without existing signup
+                    for member in guild_members:
+                        if str(member.discord_id) not in existing_signups:
+                            try:
+                                signup = RaidHelperSignup(
+                                    event_id=str(event.id),
+                                    user_id=str(member.discord_id),
+                                    user_name=member.username or "Unknown",
+                                    entry_time=current_time,
+                                    class_name="No Info",
+                                    spec_name="",
+                                    status="",
+                                    position=0
+                                )
+                                session.add(signup)
+                                existing_signups.add(str(member.discord_id))  # Add to existing signups to prevent duplicates
+                                logging.info(f"Created default signup for user {member.username}")
+                            except Exception as e:
+                                logging.error(f"Error creating signup for user {member.username}: {e}")
+                                continue
+                    
+        except Exception as e:
+            logging.error(f"Error in create_default_signups: {e}")
+            raise
+
+    async def process_closed_event(self, event: RaidHelperEvent, signups: List[Dict]) -> None:
+        """Process a single closed event and send its data to Google Sheets."""
+        logging.info(f"Processing closed event: {event.title} (ID: {event.id})")
+        
+        session = SessionLocal()
+        try:
+            # Get all signups for this event from the database
+            db_signups = session.query(RaidHelperSignup).filter(
+                RaidHelperSignup.event_id == str(event.id)
+            ).all()
+            
+            if db_signups:
+                # Format the data for Google Sheets
+                rows = self.sheets_service.format_event_data(event, db_signups)
+                
+                # Send the data to Google Sheets
+                self.sheets_service.append_rows("Sheet1!A:H", rows)
+                logging.info(f"Successfully sent {len(rows)} entries to Google Sheets for event {event.id}")
+            else:
+                logging.warning(f"No signups found for closed event {event.id}")
+                
+        except Exception as e:
+            logging.error(f"Error processing closed event {event.id}: {str(e)}")
+            raise
+        finally:
+            session.close()
+
+    async def sync_active_events(self) -> None:
+        """Synchronize active events from RaidHelper."""
+        try:
+            events = await self.fetch_server_events()
+            if not events:
+                return
+
+            # Process only the most recent events first (last 10)
+            recent_events = sorted(events, key=lambda x: x.get("startTime", 0), reverse=True)[:10]
+            
+            async with self.session_lock:
+                session = SessionLocal()
+                try:
+                    for event_data in recent_events:
+                        event_id = event_data.get("id")
+                        if not event_id:
+                            continue
+
+                        # Skip if event is already processed
+                        if is_event_processed(session, str(event_id)):
+                            continue
+
+                        event_details = await self.fetch_event_details(event_id)
+                        if not event_details:
+                            continue
+
+                        # Create or update event
+                        event = create_or_update_raidhelper_event(session, event_data)
+                        
+                        # First update existing signups from RaidHelper
+                        update_raidhelper_signups(session, str(event.id), event_details.get("signups", []))
+                        session.flush()  # Ensure all updates are visible
+                        
+                        # Then create default signups for members without existing signup
+                        await self.create_default_signups(event, session)
+
+                        # Process closed events
+                        if self.is_event_closed(event):
+                            try:
+                                await self.process_closed_event(event, event_details.get("signups", []))
+                                mark_event_as_processed(session, str(event.id))
+                            except Exception as e:
+                                logging.error(f"Error processing closed event {event.id}: {e}")
+
+                    session.commit()
+                except Exception as e:
+                    logging.error(f"Error in sync_active_events: {e}")
+                    session.rollback()
+                finally:
+                    session.close()
+
+        except Exception as e:
+            logging.error(f"Error in sync_active_events: {e}")
+
+    def is_event_closed(self, event: RaidHelperEvent) -> bool:
+        """Check if an event is closed."""
+        if not event.close_time:
+            return False
+        return event.close_time.timestamp() <= datetime.utcnow().timestamp()
 
     async def process_closed_events(self):
         """Process closed events and send their data to Google Sheets."""
         logging.info("Processing closed events")
         current_time = datetime.utcnow().timestamp()
         
-        with get_db_session() as db:
+        session = SessionLocal()
+        try:
             # Hole alle Events aus der Datenbank
-            events = db.query(RaidHelperEvent).all()
+            events = session.query(RaidHelperEvent).all()
             
             for event in events:
                 try:
                     # Überprüfe, ob das Event bereits verarbeitet wurde
-                    if is_event_processed(db, event.id):
+                    if is_event_processed(session, str(event.id)):
                         continue
                     
                     # Überprüfe, ob das Event abgeschlossen ist
@@ -161,8 +265,8 @@ class RaidHelperService:
                         logging.info(f"Processing closed event: {event.title} (ID: {event.id})")
                         
                         # Hole die Anmeldungen für das Event
-                        signups = db.query(RaidHelperSignup).filter(
-                            RaidHelperSignup.event_id == event.id
+                        signups = session.query(RaidHelperSignup).filter(
+                            RaidHelperSignup.event_id == str(event.id)
                         ).all()
                         
                         if signups:
@@ -174,13 +278,20 @@ class RaidHelperService:
                             logging.info(f"Successfully sent {len(rows)} entries to Google Sheets for event {event.id}")
                             
                             # Markiere das Event als verarbeitet
-                            mark_event_as_processed(db, event.id)
+                            mark_event_as_processed(session, str(event.id))
                         else:
                             logging.warning(f"No signups found for closed event {event.id}")
                             
                 except Exception as e:
                     logging.error(f"Error processing closed event {event.id}: {str(e)}")
                     continue
+            
+            session.commit()
+        except Exception as e:
+            logging.error(f"Error in process_closed_events: {e}")
+            session.rollback()
+        finally:
+            session.close()
     
     async def start_sync_task(self):
         """Start the background task to sync events."""

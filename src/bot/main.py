@@ -12,10 +12,10 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from sqlalchemy.orm import aliased
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, create_engine
 
 from src.database.connection import get_db_session, init_db
-from src.database.models import AFKEntry, RaidHelperEvent, RaidHelperSignup
+from src.database.models import Base, User, AFKEntry, RaidHelperEvent, RaidHelperSignup, ClanMembership, GuildWelcomeMessage
 from src.database.operations import (delete_afk_entries, get_active_afk,
                                    get_afk_statistics, get_clan_members,
                                    get_or_create_user, get_user_afk_history,
@@ -64,6 +64,16 @@ CLAN2_NAME = os.getenv("CLAN2_NAME", "Clan 2")
 CLAN1_ALIASES = [alias.strip().lower() for alias in os.getenv("CLAN1_ALIASES", "clan1,c1").split(",")]
 CLAN2_ALIASES = [alias.strip().lower() for alias in os.getenv("CLAN2_ALIASES", "clan2,c2").split(",")]
 
+# Initialize database engine
+DB_HOST = os.getenv("DB_HOST", "db")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "requiem_bot")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres")
+
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+engine = create_engine(DATABASE_URL)
+
 class RequiemBot(commands.Bot):
     """Main bot class."""
     def __init__(self):
@@ -77,241 +87,231 @@ class RequiemBot(commands.Bot):
         self.raidhelper = RaidHelperService()
 
     async def setup_hook(self):
-        """Set up the bot."""
-        try:
-            # Initialize database
-            logging.info("Initializing database...")
-            init_db()
-            logging.info("Database initialized successfully")
-            
-            # Update AFK statuses
-            with get_db_session() as db:
-                try:
-                    update_afk_active_status(db)
-                    logging.info("Updated AFK entries' active status")
-                except Exception as e:
-                    logging.error(f"Error updating AFK statuses: {e}")
+        """Initialize the bot and set up commands."""
+        logging.info("Initializing database...")
+        Base.metadata.create_all(engine)
+        logging.info("Database initialized successfully")
 
-            # Start background tasks
-            self.sync_clan_memberships.start()
-            self.update_afk_status.start()
-            # Start RaidHelper sync task as background task
-            self.bg_task = self.loop.create_task(self.raidhelper.start_sync_task())
+        # Update AFK entries' active status
+        with get_db_session() as db:
+            update_afk_active_status(db)
+        logging.info("Updated AFK entries' active status")
 
-            logging.info("Starting to sync commands...")
-            
-            # Get the guild
-            guild = discord.Object(id=GUILD_ID)
-            logging.info(f"Target guild ID: {GUILD_ID}")
-            
-            # First, remove all commands globally and from the guild
-            self.tree.clear_commands(guild=None)
-            await self.tree.sync()
-            self.tree.clear_commands(guild=guild)
-            await self.tree.sync(guild=guild)
-            
-            logging.info("Cleared all existing commands")
-            
-            # Add commands manually
-            @self.tree.command(name="afk", description="Set your AFK status", guild=guild)
-            @app_commands.describe(
-                start_date="Start date (DDMM, DD/MM or DD.MM)",
-                start_time="Start time (HHMM or HH:MM)",
-                end_date="End date (DDMM, DD/MM or DD.MM)",
-                end_time="End time (HHMM or HH:MM)",
-                reason="Reason for being AFK"
-            )
-            async def afk_command(interaction, start_date: str, start_time: str, end_date: str, end_time: str, reason: str):
-                await afk(interaction, start_date, start_time, end_date, end_time, reason)
+        # Start background tasks
+        self.sync_clan_memberships.start()
+        self.update_afk_status_task.start()
 
-            @self.tree.command(name="afkquick", description="Quickly set AFK status until end of day", guild=guild)
-            @app_commands.describe(
-                reason="Reason for being AFK",
-                days="Optional: Number of days to be AFK (default: until end of today)"
-            )
-            async def afkquick_command(interaction, reason: str, days: int = None):
-                await afkquick(interaction, reason, days)
+        # Start to sync commands
+        logging.info("Starting to sync commands...")
+        
+        # Get the guild
+        guild = discord.Object(id=GUILD_ID)
+        logging.info(f"Target guild ID: {GUILD_ID}")
+        
+        # First, remove all commands globally and from the guild
+        self.tree.clear_commands(guild=None)
+        await self.tree.sync()
+        self.tree.clear_commands(guild=guild)
+        await self.tree.sync(guild=guild)
+        
+        logging.info("Cleared all existing commands")
 
-            @self.tree.command(name="afkreturn", description="Return from AFK status", guild=guild)
-            async def afkreturn_command(interaction):
-                await afkreturn(interaction)
+        # Add commands manually
+        @self.tree.command(name="afk", description="Set your AFK status", guild=guild)
+        @app_commands.describe(
+            start_date="Start date (DDMM, DD/MM or DD.MM)",
+            start_time="Start time (HHMM or HH:MM)",
+            end_date="End date (DDMM, DD/MM or DD.MM)",
+            end_time="End time (HHMM or HH:MM)",
+            reason="Reason for being AFK"
+        )
+        async def afk_command(interaction, start_date: str, start_time: str, end_date: str, end_time: str, reason: str):
+            await afk(interaction, start_date, start_time, end_date, end_time, reason)
 
-            @self.tree.command(name="afklist", description="List all AFK users", guild=guild)
-            async def afklist_command(interaction):
-                await afklist(interaction)
+        @self.tree.command(name="afkquick", description="Quickly set AFK status until end of day", guild=guild)
+        @app_commands.describe(
+            reason="Reason for being AFK",
+            days="Optional: Number of days to be AFK (default: until end of today)"
+        )
+        async def afkquick_command(interaction, reason: str, days: int = None):
+            await afkquick(interaction, reason, days)
 
-            @self.tree.command(name="afkmy", description="Show your active and scheduled AFK entries", guild=guild)
-            async def afkmy_command(interaction):
-                await afkmy(interaction)
+        @self.tree.command(name="afkreturn", description="Return from AFK status", guild=guild)
+        async def afkreturn_command(interaction):
+            await afkreturn(interaction)
 
-            @self.tree.command(name="afkhistory", description="Show AFK history for a user", guild=guild)
-            @app_commands.describe(user="The user to check history for")
-            async def afkhistory_command(interaction, user: discord.Member):
-                await afkhistory(interaction, user)
+        @self.tree.command(name="afklist", description="List all AFK users", guild=guild)
+        async def afklist_command(interaction):
+            await afklist(interaction)
 
-            @self.tree.command(name="afkdelete", description="Delete AFK entries (Admin only, use /afkhistory to get the ID)", guild=guild)
-            @app_commands.describe(
-                user="The user whose AFK entries you want to delete",
-                all_entries="Delete all entries for this user? If false, only deletes active entries",
-                afk_id="Optional: Specific AFK entry ID to delete (overrides all_entries)"
-            )
-            @has_required_role()
-            async def afkdelete_command(interaction, user: discord.Member, all_entries: bool = False, afk_id: Optional[int] = None):
-                await afkdelete(interaction, user, all_entries, afk_id)
+        @self.tree.command(name="afkmy", description="Show your active and scheduled AFK entries", guild=guild)
+        async def afkmy_command(interaction):
+            await afkmy(interaction)
 
-            @self.tree.command(name="afkstats", description="Show AFK statistics", guild=guild)
-            async def afkstats_command(interaction):
-                await afkstats(interaction)
+        @self.tree.command(name="afkhistory", description="Show AFK history for a user", guild=guild)
+        @app_commands.describe(user="The user to check history for")
+        async def afkhistory_command(interaction, user: discord.Member):
+            await afkhistory(interaction, user)
 
-            @self.tree.command(name="getmembers", description="List all members with a specific role", guild=guild)
-            @app_commands.describe(role="The role to check members for")
-            async def getmembers_command(interaction, role: discord.Role):
-                await getmembers(interaction, role)
+        @self.tree.command(name="afkdelete", description="Delete AFK entries (Admin only, use /afkhistory to get the ID)", guild=guild)
+        @app_commands.describe(
+            user="The user whose AFK entries you want to delete",
+            all_entries="Delete all entries for this user? If false, only deletes active entries",
+            afk_id="Optional: Specific AFK entry ID to delete (overrides all_entries)"
+        )
+        @has_required_role()
+        async def afkdelete_command(interaction, user: discord.Member, all_entries: bool = False, afk_id: Optional[int] = None):
+            await afkdelete(interaction, user, all_entries, afk_id)
 
-            @self.tree.command(name="afkremove", description="Remove one of your future AFK entries", guild=guild)
-            @app_commands.describe(afk_id="The ID of the AFK entry to remove (use /afkmy to see your entries)")
-            async def afkremove_command(interaction, afk_id: int):
-                await afkremove(interaction, afk_id)
+        @self.tree.command(name="afkstats", description="Show AFK statistics", guild=guild)
+        async def afkstats_command(interaction):
+            await afkstats(interaction)
 
-            @self.tree.command(name="checksignups", description="Compares role members with Raid-Helper signups", guild=guild)
-            @app_commands.describe(
-                role="The role to check members for",
-                event_id="The Raid-Helper event ID"
-            )
-            @has_required_role()
-            async def checksignups_command(interaction, role: discord.Role, event_id: str):
-                await checksignups(interaction, role, event_id)
+        @self.tree.command(name="getmembers", description="List all members with a specific role", guild=guild)
+        @app_commands.describe(role="The role to check members for")
+        async def getmembers_command(interaction, role: discord.Role):
+            await getmembers(interaction, role)
 
-            @self.tree.command(name="afkextend", description="Extend an existing AFK entry (use /afkmy to get the ID)", guild=guild)
-            @app_commands.describe(
-                afk_id="The ID of the AFK entry to extend (use /afkmy to see your entries)",
-                hours="Number of hours to extend by"
-            )
-            async def afkextend_command(interaction: discord.Interaction, afk_id: int, hours: int):
-                await afkextend(interaction, afk_id, hours)
+        @self.tree.command(name="afkremove", description="Remove one of your future AFK entries", guild=guild)
+        @app_commands.describe(afk_id="The ID of the AFK entry to remove (use /afkmy to see your entries)")
+        async def afkremove_command(interaction, afk_id: int):
+            await afkremove(interaction, afk_id)
 
-            @self.tree.command(
-                name="clanhistory",
-                description="Show clan membership history for a user (Admin/Officer only)",
-                guild=guild
-            )
-            @app_commands.describe(
-                user="The user to check history for (optional, defaults to yourself)",
-                include_inactive="Include past memberships (default: false)"
-            )
-            @has_required_role()
-            async def clanhistory_command(
-                interaction: discord.Interaction,
-                user: Optional[discord.Member] = None,
-                include_inactive: bool = False
-            ):
-                await clan_history(interaction, user, include_inactive)
+        @self.tree.command(name="checksignups", description="Compares role members with Raid-Helper signups", guild=guild)
+        @app_commands.describe(
+            role="The role to check members for",
+            event_id="The Raid-Helper event ID"
+        )
+        @has_required_role()
+        async def checksignups_command(interaction, role: discord.Role, event_id: str):
+            await checksignups(interaction, role, event_id)
 
-            @self.tree.command(
-                name="clanchanges",
-                description="Show recent clan membership changes (Admin/Officer only)",
-                guild=guild
-            )
-            @app_commands.describe(
-                clan="The clan to check changes for (optional, shows all clans if not specified)",
-                days="Number of days to look back (default: 7)"
-            )
-            @has_required_role()
-            async def clanchanges_command(
-                interaction: discord.Interaction,
-                clan: Optional[str] = None,
-                days: int = 7
-            ):
-                await clan_changes(interaction, clan, days)
+        @self.tree.command(name="afkextend", description="Extend an existing AFK entry (use /afkmy to get the ID)", guild=guild)
+        @app_commands.describe(
+            afk_id="The ID of the AFK entry to extend (use /afkmy to see your entries)",
+            hours="Number of hours to extend by"
+        )
+        async def afkextend_command(interaction: discord.Interaction, afk_id: int, hours: int):
+            await afkextend(interaction, afk_id, hours)
 
-            @self.tree.command(
-                name="guildadd",
-                description="Add a user to a guild (Admin/Officer only)",
-                guild=guild
-            )
-            @app_commands.describe(
-                user="The user to add to the guild",
-                guild="The guild to add the user to",
-                send_welcome="Send welcome message to user (default: True)"
-            )
-            @has_required_role()
-            async def guildadd_command(
-                interaction: discord.Interaction,
-                user: discord.Member,
-                guild: str,
-                send_welcome: bool = True
-            ):
-                await guildadd(interaction, user, guild, send_welcome)
+        @self.tree.command(
+            name="clanhistory",
+            description="Show clan membership history for a user (Admin/Officer only)",
+            guild=guild
+        )
+        @app_commands.describe(
+            user="The user to check history for (optional, defaults to yourself)",
+            include_inactive="Include past memberships (default: false)"
+        )
+        @has_required_role()
+        async def clanhistory_command(
+            interaction: discord.Interaction,
+            user: Optional[discord.Member] = None,
+            include_inactive: bool = False
+        ):
+            await clan_history(interaction, user, include_inactive)
 
-            @self.tree.command(
-                name="welcomeset",
-                description="Set welcome message for a guild (Admin only)",
-                guild=guild
-            )
-            @app_commands.describe(
-                guild="The guild to set the welcome message for",
-                message="The welcome message to send to new members"
-            )
-            @has_admin_role()
-            async def welcomeset_command(
-                interaction: discord.Interaction,
-                guild: str,
-                message: str
-            ):
-                await setwelcome(interaction, guild, message)
+        @self.tree.command(
+            name="clanchanges",
+            description="Show recent clan membership changes (Admin/Officer only)",
+            guild=guild
+        )
+        @app_commands.describe(
+            clan="The clan to check changes for (optional, shows all clans if not specified)",
+            days="Number of days to look back (default: 7)"
+        )
+        @has_required_role()
+        async def clanchanges_command(
+            interaction: discord.Interaction,
+            clan: Optional[str] = None,
+            days: int = 7
+        ):
+            await clan_changes(interaction, clan, days)
 
-            @self.tree.command(
-                name="welcomeshow",
-                description="Show welcome messages for all guilds (Admin/Officer only)",
-                guild=guild
-            )
-            @app_commands.describe(
-                guild="Optional: Show message for specific guild only"
-            )
-            @has_required_role()
-            async def welcomeshow_command(
-                interaction: discord.Interaction,
-                guild: Optional[str] = None
-            ):
-                await welcomeshow(interaction, guild)
+        @self.tree.command(
+            name="guildadd",
+            description="Add a user to a guild (Admin/Officer only)",
+            guild=guild
+        )
+        @app_commands.describe(
+            user="The user to add to the guild",
+            guild="The guild to add the user to",
+            send_welcome="Send welcome message to user (default: True)"
+        )
+        @has_required_role()
+        async def guildadd_command(
+            interaction: discord.Interaction,
+            user: discord.Member,
+            guild: str,
+            send_welcome: bool = True
+        ):
+            await guildadd(interaction, user, guild, send_welcome)
 
-            @self.tree.command(
-                name="guildremove",
-                description="Remove a user from a guild (Admin/Officer only)",
-                guild=guild
-            )
-            @app_commands.describe(
-                user="The user to remove from the guild",
-                guild="The guild to remove the user from",
-                kick_from_discord="Also kick the user from Discord (default: False)"
-            )
-            @has_required_role()
-            async def guildremove_command(
-                interaction: discord.Interaction,
-                user: discord.Member,
-                guild: str,
-                kick_from_discord: bool = False
-            ):
-                await guildremove(interaction, user, guild, kick_from_discord)
+        @self.tree.command(
+            name="welcomeset",
+            description="Set welcome message for a guild (Admin only)",
+            guild=guild
+        )
+        @app_commands.describe(
+            guild="The guild to set the welcome message for",
+            message="The welcome message to send to new members"
+        )
+        @has_admin_role()
+        async def welcomeset_command(
+            interaction: discord.Interaction,
+            guild: str,
+            message: str
+        ):
+            await setwelcome(interaction, guild, message)
 
-            @self.tree.command(name="eventhistory", description="Zeigt die Event-Historie eines Benutzers", guild=guild)
-            @app_commands.describe(
-                user="Der Benutzer, dessen Historie angezeigt werden soll",
-                limit="Anzahl der anzuzeigenden Events (Standard: 10)"
-            )
-            async def eventhistory_command(interaction: discord.Interaction, user: discord.Member, limit: int = 10):
-                await eventhistory(interaction, user, limit)
+        @self.tree.command(
+            name="welcomeshow",
+            description="Show welcome messages for all guilds (Admin/Officer only)",
+            guild=guild
+        )
+        @app_commands.describe(
+            guild="Optional: Show message for specific guild only"
+        )
+        @has_required_role()
+        async def welcomeshow_command(
+            interaction: discord.Interaction,
+            guild: Optional[str] = None
+        ):
+            await welcomeshow(interaction, guild)
 
-            # Sync the commands
-            synced = await self.tree.sync(guild=guild)
-            
-            logging.info(f"Successfully synced {len(synced)} command(s) to guild {GUILD_ID}")
-            for command in synced:
-                logging.info(f"Synced command: {command.name}")
-                
-        except Exception as e:
-            logging.error(f"Error syncing commands: {e}")
-            raise
+        @self.tree.command(
+            name="guildremove",
+            description="Remove a user from a guild (Admin/Officer only)",
+            guild=guild
+        )
+        @app_commands.describe(
+            user="The user to remove from the guild",
+            guild="The guild to remove the user from",
+            kick_from_discord="Also kick the user from Discord (default: False)"
+        )
+        @has_required_role()
+        async def guildremove_command(
+            interaction: discord.Interaction,
+            user: discord.Member,
+            guild: str,
+            kick_from_discord: bool = False
+        ):
+            await guildremove(interaction, user, guild, kick_from_discord)
+
+        @self.tree.command(name="eventhistory", description="Zeigt die Event-Historie eines Benutzers", guild=guild)
+        @app_commands.describe(
+            user="Der Benutzer, dessen Historie angezeigt werden soll",
+            limit="Anzahl der anzuzeigenden Events (Standard: 10)"
+        )
+        async def eventhistory_command(interaction: discord.Interaction, user: discord.Member, limit: int = 10):
+            await eventhistory(interaction, user, limit)
+
+        # Sync the commands
+        synced = await self.tree.sync(guild=guild)
+        
+        logging.info(f"Successfully synced {len(synced)} command(s) to guild {GUILD_ID}")
+        for command in synced:
+            logging.info(f"Synced command: {command.name}")
 
     @tasks.loop(minutes=1)
     async def sync_clan_memberships(self):
@@ -375,24 +375,24 @@ class RequiemBot(commands.Bot):
             logging.error(f"Error syncing clan memberships: {e}")
 
     @tasks.loop(minutes=1)
-    async def update_afk_status(self):
-        """Update AFK statuses every minute."""
+    async def update_afk_status_task(self):
+        """Update AFK status periodically."""
         try:
             if not self.is_ready():
                 return
-                
+            
             with get_db_session() as db:
                 update_afk_active_status(db)
-                logging.debug("Updated AFK statuses")
+        
         except Exception as e:
-            logging.error(f"Error in periodic AFK status update: {e}")
+            logging.error(f"Error updating AFK status: {e}")
 
     @sync_clan_memberships.before_loop
     async def before_sync_clan_memberships(self):
         """Wait for the bot to be ready before starting the sync task."""
         await self.wait_until_ready()
 
-    @update_afk_status.before_loop
+    @update_afk_status_task.before_loop
     async def before_update_afk_status(self):
         """Wait for the bot to be ready before starting the update task."""
         await self.wait_until_ready()
