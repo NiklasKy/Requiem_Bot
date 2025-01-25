@@ -49,12 +49,8 @@ async def sync_event(event_id: str):
                     logging.info(f"Found {len(class_info['signups'])} signups in {class_info['name']}")
     
     # Extract signups from the response
-    signups = []
-    if "signups" in event_details:
-        signups = event_details["signups"]
-        logging.info(f"Found {len(signups)} signups directly in event_details")
-    
-    logging.info(f"Found total of {len(signups)} signups in API response")
+    signups = event_details.get("signUps", [])
+    logging.info(f"Found {len(signups)} signups in API response")
         
     with get_db_session() as session:
         # Get or create event in database
