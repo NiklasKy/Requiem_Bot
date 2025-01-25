@@ -8,7 +8,7 @@ import asyncio
 
 from src.database.connection import get_db_session, SessionLocal
 from src.database.operations import create_or_update_raidhelper_event, update_raidhelper_signups, get_active_raidhelper_events, mark_event_as_processed, is_event_processed
-from src.database.models import RaidHelperEvent, RaidHelperSignup, User, GuildInfo, ClanMembership
+from src.database.models import RaidHelperEvent, RaidHelperSignup, User, GuildInfo, ClanMembership, ProcessedEvent
 from src.services.google_sheets import GoogleSheetsService
 
 class RaidHelperService:
