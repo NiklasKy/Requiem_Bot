@@ -38,13 +38,23 @@ async def sync_event(event_id: str):
         logging.error(f"Could not fetch event {event_id} from RaidHelper API")
         return
     
+    # Debug: Print the structure of event_details
+    logging.info("API Response Structure:")
+    for key in event_details.keys():
+        logging.info(f"Found key: {key}")
+        if key == "classes":
+            for class_info in event_details["classes"]:
+                logging.info(f"Class: {class_info.get('name')} - {len(class_info.get('specs', []))} specs")
+                if "signups" in class_info:
+                    logging.info(f"Found {len(class_info['signups'])} signups in {class_info['name']}")
+    
     # Extract signups from the response
     signups = []
-    for class_info in event_details.get("classes", []):
-        if "signups" in class_info:
-            signups.extend(class_info["signups"])
+    if "signups" in event_details:
+        signups = event_details["signups"]
+        logging.info(f"Found {len(signups)} signups directly in event_details")
     
-    logging.info(f"Found {len(signups)} signups in API response")
+    logging.info(f"Found total of {len(signups)} signups in API response")
         
     with get_db_session() as session:
         # Get or create event in database
@@ -82,7 +92,7 @@ async def sync_event(event_id: str):
         
         # Create new signups from API data
         for signup in signups:
-            logging.info(f"Processing signup for user: {signup.get('name', 'Unknown')}")
+            logging.info(f"Processing signup data: {json.dumps(signup, indent=2)}")
             signup_data = RaidHelperSignup(
                 event_id=event_id,
                 user_id=signup.get("userId", ""),
