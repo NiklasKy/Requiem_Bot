@@ -212,16 +212,16 @@ class GoogleSheetsService:
                     logging.debug(f"Found guild name: {guild_name} for role_id: {user.clan_role_id}")
                 
                 # Convert specific class_names and status to "Present"
-                status = signup.status
+                status = signup.class_name
                 if signup.class_name in ["DPS", "Tank", "Healer", "Dps"]:
                     status = "Present"
                 elif signup.class_name == "No Info":
                     status = "No Info"
-                elif signup.status == "":
+                elif signup.class_name == "":
                     status = signup.class_name or "No Info"
                 else:
                     # Behalte den originalen Status bei (z.B. "Absence", "Bench", etc.)
-                    status = signup.status
+                    status = signup.class_name
                 
                 # Check for AFK status
                 afk_status = "-"
