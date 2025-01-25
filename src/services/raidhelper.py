@@ -337,8 +337,9 @@ class RaidHelperService:
         logging.info("Starting RaidHelper sync task")
         while True:
             try:
+                # Nur sync_active_events aufrufen, da diese Methode bereits
+                # die Verarbeitung geschlossener Events übernimmt
                 await self.sync_active_events()
-                await self.process_closed_events()  # Füge Verarbeitung geschlossener Events hinzu
             except Exception as e:
                 logging.error(f"Error in sync task: {e}")
             

@@ -209,13 +209,19 @@ class GoogleSheetsService:
                     guild_name = guild_info_map.get(user.clan_role_id, "Unknown")
                     logging.debug(f"Found guild name: {guild_name} for role_id: {user.clan_role_id}")
                 
-                # Convert specific class_names to "Present"
-                status = signup.class_name
-                if status in ["DPS", "Tank", "Healer"]:
+                # Convert specific class_names and status to "Present"
+                status = signup.status
+                if status in ["primary", "confirmed"]:
                     status = "Present"
+                elif signup.class_name in ["DPS", "Tank", "Healer", "Dps"]:
+                    status = "Present"
+                elif signup.class_name == "No Info":
+                    status = "No Info"
+                elif signup.status == "":
+                    status = signup.class_name or "No Info"
                 
                 # Check for AFK status
-                afk_status = "-"  # Default to "-" instead of "Not AFK"
+                afk_status = "-"
                 if user:
                     afk_entry = (
                         session.query(AFKEntry)
@@ -230,16 +236,20 @@ class GoogleSheetsService:
                     if afk_entry:
                         afk_status = f"AFK: {afk_entry.reason}"
                 
+                # Format date and time in German format
+                event_date = event.end_time.strftime("%d.%m.%Y")
+                event_time = event.end_time.strftime("%H:%M")
+                
                 row = [
-                    event.end_time.strftime("%Y-%m-%d"),   # Date without apostrophe
-                    event.end_time.strftime("%H:%M"),      # Time without apostrophe
-                    str(event.id),                         # Event ID
-                    event.title,                           # Title
-                    guild_name,                            # Guild
-                    signup.user_name,                      # User Name
-                    str(signup.user_id),                   # Discord ID
-                    status,                                # Status
-                    afk_status                            # AFK Status
+                    event_date,                            # Date in German format
+                    event_time,                           # Time in 24h format
+                    str(event.id),                        # Event ID
+                    event.title,                          # Title
+                    guild_name,                           # Guild
+                    signup.user_name,                     # User Name
+                    str(signup.user_id),                  # Discord ID
+                    status,                               # Status
+                    afk_status                           # AFK Status
                 ]
                 rows.append(row)
                 logging.debug(f"Added row for {signup.user_name}: {row}")
