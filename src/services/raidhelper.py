@@ -211,10 +211,7 @@ class RaidHelperService:
                         if not event_id:
                             continue
 
-                        # Skip if event is already processed
-                        if is_event_processed(session, str(event_id)):
-                            continue
-
+                        # Get event details
                         event_details = await self.fetch_event_details(event_id)
                         if not event_details:
                             continue
@@ -282,6 +279,13 @@ class RaidHelperService:
                         # Process closed events
                         if self.is_event_closed(event):
                             try:
+                                # Remove from processed_events to allow reprocessing
+                                processed_event = session.query(ProcessedEvent).filter(
+                                    ProcessedEvent.event_id == str(event_id)
+                                ).first()
+                                if processed_event:
+                                    session.delete(processed_event)
+                                
                                 await self.process_closed_event(event, event_details.get("signups", []))
                                 mark_event_as_processed(session, str(event.id))
                             except Exception as e:

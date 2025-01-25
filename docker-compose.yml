@@ -10,6 +10,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backups:/backups
+      - ./scripts:/docker-entrypoint-initdb.d:ro
       - ./scripts:/scripts
     ports:
       - "5432:5432"
@@ -23,6 +24,7 @@ services:
     command: |
       bash -c '
         chmod +x /scripts/backup_db.sh &&
+        chmod +x /scripts/init-db.sh &&
         /scripts/backup_db.sh &
         docker-entrypoint.sh postgres'
     restart: unless-stopped

@@ -130,12 +130,12 @@ class GoogleSheetsService:
             }
             
             # Aktualisiere den range_name, um das korrekte Sheet zu verwenden
-            range_name = f"{self.sheet_name}!A:H"
+            range_name = f"{self.sheet_name}!A:I"
             
             result = self.service.spreadsheets().values().append(
                 spreadsheetId=self.spreadsheet_id,
                 range=range_name,
-                valueInputOption='RAW',
+                valueInputOption='USER_ENTERED',  # Changed from 'RAW' to 'USER_ENTERED'
                 insertDataOption='INSERT_ROWS',
                 body=body
             ).execute()
@@ -231,8 +231,8 @@ class GoogleSheetsService:
                         afk_status = f"AFK: {afk_entry.reason}"
                 
                 row = [
-                    event.end_time.strftime("%Y-%m-%d"),   # Date
-                    event.end_time.strftime("%H:%M"),      # Time
+                    event.end_time.strftime("%Y-%m-%d"),   # Date without apostrophe
+                    event.end_time.strftime("%H:%M"),      # Time without apostrophe
                     str(event.id),                         # Event ID
                     event.title,                           # Title
                     guild_name,                            # Guild

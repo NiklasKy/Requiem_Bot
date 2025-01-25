@@ -8,7 +8,7 @@ sys.path.append(str(project_root))
 
 import logging
 from src.database.connection import get_db_session
-from src.database.models import ProcessedEvent, RaidHelperEvent
+from src.database.models import ProcessedEvent, RaidHelperEvent, RaidHelperSignup
 from src.services.raidhelper import RaidHelperService
 from src.services.google_sheets import GoogleSheetsService
 
@@ -34,12 +34,17 @@ def reprocess_event(event_id: str):
         if not event:
             logging.error(f"Event {event_id} not found in database")
             return
+            
+        # Get all signups for this event
+        signups = session.query(RaidHelperSignup).filter(
+            RaidHelperSignup.event_id == str(event_id)
+        ).all()
         
         # Initialize services
         rh_service = RaidHelperService()
         
-        # Process event
-        rh_service.process_closed_event(event)
+        # Process event with signups
+        rh_service.process_closed_event(event, signups)
         logging.info(f"Successfully reprocessed event {event_id}")
 
 if __name__ == "__main__":
