@@ -228,24 +228,23 @@ class RaidHelperService:
                             # Debug logging
                             logging.debug(f"Processing signup: {signup}")
                             
-                            # Extract class and spec info
-                            class_info = signup.get("class", {})
-                            class_name = class_info.get("name", "")
-                            spec_name = class_info.get("spec", {}).get("name", "")
-                            
                             transformed_signup = {
                                 "userId": signup["userId"],
                                 "name": signup["name"],
                                 "entryTime": signup["entryTime"],
                                 "status": signup["status"],
-                                "className": class_name,
-                                "specName": spec_name,
+                                "className": signup.get("className", ""),  # Direkt aus der API
+                                "specName": signup.get("specName", ""),   # Direkt aus der API
                                 "position": signup.get("position", 0)
                             }
                             transformed_signups.append(transformed_signup)
                             logging.debug(f"Transformed signup: {transformed_signup}")
                         
                         logging.info(f"Updating {len(transformed_signups)} signups for event {event_id}")
+                        # Debug: Log ein vollständiges Signup-Objekt
+                        if signups_data:
+                            logging.info(f"Example signup from API: {signups_data[0]}")
+                        
                         update_raidhelper_signups(session, str(event_id), transformed_signups)
                         
                         session.flush()  # Ensure all updates are visible
