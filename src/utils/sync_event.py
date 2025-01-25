@@ -38,8 +38,12 @@ async def sync_event(event_id: str):
         logging.error(f"Could not fetch event {event_id} from RaidHelper API")
         return
     
-    logging.info(f"Received event details from API: {json.dumps(event_details, indent=2)}")
-    signups = event_details.get("signups", [])
+    # Extract signups from the response
+    signups = []
+    for class_info in event_details.get("classes", []):
+        if "signups" in class_info:
+            signups.extend(class_info["signups"])
+    
     logging.info(f"Found {len(signups)} signups in API response")
         
     with get_db_session() as session:
@@ -61,7 +65,7 @@ async def sync_event(event_id: str):
         event.channel_name = event_details.get("channelName", "")
         event.start_time = convert_timestamp(event_details.get("startTime"))
         event.end_time = convert_timestamp(event_details.get("endTime"))
-        event.close_time = convert_timestamp(event_details.get("closeTime"))
+        event.close_time = convert_timestamp(event_details.get("closingTime"))
         event.last_updated = convert_timestamp(event_details.get("lastUpdated"))
         event.template_id = event_details.get("templateId", "")
         event.sign_up_count = len(signups)
@@ -78,17 +82,17 @@ async def sync_event(event_id: str):
         
         # Create new signups from API data
         for signup in signups:
-            logging.info(f"Processing signup for user: {signup.get('userName', 'Unknown')}")
+            logging.info(f"Processing signup for user: {signup.get('name', 'Unknown')}")
             signup_data = RaidHelperSignup(
                 event_id=event_id,
                 user_id=signup.get("userId", ""),
-                user_name=signup.get("userName", ""),
+                user_name=signup.get("name", ""),
                 spec_name=signup.get("specName", ""),
                 class_name=signup.get("className", ""),
-                role=signup.get("role", ""),
+                role=signup.get("className", ""),  # Using className as role since that's what we have
                 status=signup.get("status", ""),
-                signup_time=convert_timestamp(signup.get("signupTime")),
-                tentative=signup.get("tentative", False)
+                signup_time=convert_timestamp(signup.get("entryTime")),
+                tentative=False  # Default to False as we don't have this info
             )
             session.add(signup_data)
         
