@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from datetime import datetime
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent.parent
@@ -16,6 +17,15 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+
+def convert_timestamp(ts):
+    """Convert Unix timestamp to datetime object."""
+    if not ts:
+        return None
+    try:
+        return datetime.fromtimestamp(int(ts))
+    except (ValueError, TypeError):
+        return None
 
 async def sync_event(event_id: str):
     """Sync a specific event and its signups from RaidHelper API and update database entries."""
@@ -41,10 +51,10 @@ async def sync_event(event_id: str):
         event.leader_name = event_details.get("leaderName", "")
         event.channel_id = event_details.get("channelId", "")
         event.channel_name = event_details.get("channelName", "")
-        event.start_time = event_details.get("startTime", "")
-        event.end_time = event_details.get("endTime", "")
-        event.close_time = event_details.get("closeTime", "")
-        event.last_updated = event_details.get("lastUpdated", "")
+        event.start_time = convert_timestamp(event_details.get("startTime"))
+        event.end_time = convert_timestamp(event_details.get("endTime"))
+        event.close_time = convert_timestamp(event_details.get("closeTime"))
+        event.last_updated = convert_timestamp(event_details.get("lastUpdated"))
         event.template_id = event_details.get("templateId", "")
         event.sign_up_count = len(event_details.get("signups", []))
         
@@ -63,7 +73,7 @@ async def sync_event(event_id: str):
                 class_name=signup.get("className", ""),
                 role=signup.get("role", ""),
                 status=signup.get("status", ""),
-                signup_time=signup.get("signupTime", ""),
+                signup_time=convert_timestamp(signup.get("signupTime")),
                 tentative=signup.get("tentative", False)
             )
             session.add(signup_data)
