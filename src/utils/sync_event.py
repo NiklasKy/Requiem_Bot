@@ -2,6 +2,7 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime
+import json
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent.parent
@@ -36,12 +37,19 @@ async def sync_event(event_id: str):
     if not event_details:
         logging.error(f"Could not fetch event {event_id} from RaidHelper API")
         return
+    
+    logging.info(f"Received event details from API: {json.dumps(event_details, indent=2)}")
+    signups = event_details.get("signups", [])
+    logging.info(f"Found {len(signups)} signups in API response")
         
     with get_db_session() as session:
         # Get or create event in database
         event = session.query(RaidHelperEvent).filter(RaidHelperEvent.id == event_id).first()
         if not event:
             event = RaidHelperEvent()
+            logging.info("Creating new event in database")
+        else:
+            logging.info("Updating existing event in database")
             
         # Update event data
         event.id = event_id
@@ -56,15 +64,21 @@ async def sync_event(event_id: str):
         event.close_time = convert_timestamp(event_details.get("closeTime"))
         event.last_updated = convert_timestamp(event_details.get("lastUpdated"))
         event.template_id = event_details.get("templateId", "")
-        event.sign_up_count = len(event_details.get("signups", []))
+        event.sign_up_count = len(signups)
         
         session.add(event)
         
+        # Count existing signups
+        existing_count = session.query(RaidHelperSignup).filter(RaidHelperSignup.event_id == event_id).count()
+        logging.info(f"Found {existing_count} existing signups in database")
+        
         # Delete existing signups for this event
         session.query(RaidHelperSignup).filter(RaidHelperSignup.event_id == event_id).delete()
+        logging.info("Deleted existing signups from database")
         
         # Create new signups from API data
-        for signup in event_details.get("signups", []):
+        for signup in signups:
+            logging.info(f"Processing signup for user: {signup.get('userName', 'Unknown')}")
             signup_data = RaidHelperSignup(
                 event_id=event_id,
                 user_id=signup.get("userId", ""),
@@ -80,7 +94,9 @@ async def sync_event(event_id: str):
         
         try:
             session.commit()
-            logging.info(f"Successfully synced event {event_id} and its signups from RaidHelper API")
+            new_count = session.query(RaidHelperSignup).filter(RaidHelperSignup.event_id == event_id).count()
+            logging.info(f"Successfully synced event {event_id}")
+            logging.info(f"Signups before: {existing_count}, Signups after: {new_count}")
         except Exception as e:
             session.rollback()
             logging.error(f"Failed to save event {event_id} and its signups: {str(e)}")
