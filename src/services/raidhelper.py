@@ -8,7 +8,7 @@ import asyncio
 
 from src.database.connection import get_db_session, SessionLocal
 from src.database.operations import create_or_update_raidhelper_event, update_raidhelper_signups, get_active_raidhelper_events, mark_event_as_processed, is_event_processed
-from src.database.models import RaidHelperEvent, RaidHelperSignup, User, GuildInfo
+from src.database.models import RaidHelperEvent, RaidHelperSignup, User, GuildInfo, ClanMembership
 from src.services.google_sheets import GoogleSheetsService
 
 class RaidHelperService:
@@ -125,21 +125,30 @@ class RaidHelperService:
                 if any(part in event_title_lower for part in guild_name_parts):
                     logging.info(f"Found guild {guild.name} in event title {event.title} (partial match)")
                     
-                    # Get all users with this guild role
-                    guild_members = session.query(User).filter(
-                        User.clan_role_id == guild.role_id
-                    ).all()
+                    # Get all active clan memberships for this guild at event time
+                    active_memberships = (
+                        session.query(ClanMembership)
+                        .join(User)
+                        .filter(
+                            ClanMembership.clan_role_id == guild.role_id,
+                            ClanMembership.is_active == True,
+                            ClanMembership.joined_at <= event.start_time,
+                            ClanMembership.left_at.is_(None) | (ClanMembership.left_at >= event.start_time)
+                        )
+                        .all()
+                    )
                     
-                    logging.info(f"Found {len(guild_members)} members in guild {guild.name}")
+                    logging.info(f"Found {len(active_memberships)} active members in guild {guild.name}")
                     
-                    # Create default signups for members without existing signup
-                    for member in guild_members:
-                        if str(member.discord_id) not in existing_signups:
+                    # Create default signups for active members without existing signup
+                    for membership in active_memberships:
+                        user = membership.user
+                        if str(user.discord_id) not in existing_signups:
                             try:
                                 signup = RaidHelperSignup(
                                     event_id=str(event.id),
-                                    user_id=str(member.discord_id),
-                                    user_name=member.username or "Unknown",
+                                    user_id=str(user.discord_id),
+                                    user_name=user.username or "Unknown",
                                     entry_time=current_time,
                                     class_name="No Info",
                                     spec_name="",
@@ -147,10 +156,10 @@ class RaidHelperService:
                                     position=0
                                 )
                                 session.add(signup)
-                                existing_signups.add(str(member.discord_id))  # Add to existing signups to prevent duplicates
-                                logging.info(f"Created default signup for user {member.username}")
+                                existing_signups.add(str(user.discord_id))  # Add to existing signups to prevent duplicates
+                                logging.info(f"Created default signup for user {user.username}")
                             except Exception as e:
-                                logging.error(f"Error creating signup for user {member.username}: {e}")
+                                logging.error(f"Error creating signup for user {user.username}: {e}")
                                 continue
                     
         except Exception as e:
