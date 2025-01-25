@@ -186,7 +186,9 @@ class GoogleSheetsService:
             
     def format_event_data(self, event, signups):
         """Format event and signup data for Google Sheets."""
-        rows = []
+        # Temporäre Liste für die Sortierung
+        temp_rows = []
+        
         with get_db_session() as session:
             # Create a dictionary of guild_role_id to guild name for faster lookups
             guild_info_map = {
@@ -211,14 +213,15 @@ class GoogleSheetsService:
                 
                 # Convert specific class_names and status to "Present"
                 status = signup.status
-                if status in ["primary", "confirmed"]:
-                    status = "Present"
-                elif signup.class_name in ["DPS", "Tank", "Healer", "Dps"]:
+                if signup.class_name in ["DPS", "Tank", "Healer", "Dps"]:
                     status = "Present"
                 elif signup.class_name == "No Info":
                     status = "No Info"
                 elif signup.status == "":
                     status = signup.class_name or "No Info"
+                else:
+                    # Behalte den originalen Status bei (z.B. "Absence", "Bench", etc.)
+                    status = signup.status
                 
                 # Check for AFK status
                 afk_status = "-"
@@ -251,7 +254,25 @@ class GoogleSheetsService:
                     status,                               # Status
                     afk_status                           # AFK Status
                 ]
-                rows.append(row)
-                logging.debug(f"Added row for {signup.user_name}: {row}")
+                # Füge die Zeile mit Gildennamen zur temporären Liste hinzu
+                temp_rows.append((guild_name, row))
+        
+        # Sortiere die Zeilen nach Gildennamen
+        # Requiem Main zuerst, dann Requiem North, dann Unknown
+        def guild_sort_key(item):
+            guild = item[0]
+            if guild == "Requiem Main":
+                return 0
+            elif guild == "Requiem North":
+                return 1
+            elif guild == "Unknown":
+                return 3
+            else:
+                return 2
+
+        temp_rows.sort(key=guild_sort_key)
+        
+        # Extrahiere nur die Zeilen ohne Gildennamen für die Rückgabe
+        rows = [row for _, row in temp_rows]
         
         return rows 
