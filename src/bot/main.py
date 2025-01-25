@@ -15,7 +15,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy import and_, or_, create_engine
 
 from src.database.connection import get_db_session, init_db
-from src.database.models import Base, User, AFKEntry, RaidHelperEvent, RaidHelperSignup, ClanMembership, GuildWelcomeMessage
+from src.database.models import Base, User, AFKEntry, RaidHelperEvent, RaidHelperSignup, ClanMembership, GuildWelcomeMessage, ProcessedEvent
 from src.database.operations import (delete_afk_entries, get_active_afk,
                                    get_afk_statistics, get_clan_members,
                                    get_or_create_user, get_user_afk_history,
@@ -25,7 +25,7 @@ from src.database.operations import (delete_afk_entries, get_active_afk,
                                    sync_clan_memberships, get_clan_membership_history,
                                    extend_afk, set_guild_welcome_message, get_guild_welcome_message,
                                    add_user_to_guild, get_all_welcome_messages, remove_user_from_guild,
-                                   get_user_event_history)
+                                   get_user_event_history, mark_event_as_processed)
 from src.utils.time_parser import parse_date, parse_time, parse_datetime
 from src.services.raidhelper import RaidHelperService
 
@@ -298,13 +298,113 @@ class RequiemBot(commands.Bot):
         ):
             await guildremove(interaction, user, guild, kick_from_discord)
 
-        @self.tree.command(name="eventhistory", description="Zeigt die Event-Historie eines Benutzers", guild=guild)
+        @self.tree.command(
+            name="eventhistory",
+            description="Show event history for a user",
+            guild=guild
+        )
         @app_commands.describe(
-            user="Der Benutzer, dessen Historie angezeigt werden soll",
-            limit="Anzahl der anzuzeigenden Events (Standard: 10)"
+            user="The user whose history should be shown",
+            limit="Number of events to show (default: 10)"
         )
         async def eventhistory_command(interaction: discord.Interaction, user: discord.Member, limit: int = 10):
             await eventhistory(interaction, user, limit)
+
+        @self.tree.command(
+            name="activityedit",
+            description="Edit a user's activity status for an event (Admin/Officer only)",
+            guild=guild
+        )
+        @app_commands.describe(
+            event_id="The event ID",
+            user="The user whose status should be changed",
+            status="The new status (Present, Absent, No Show)"
+        )
+        @app_commands.choices(status=[
+            app_commands.Choice(name="Present", value="Present"),
+            app_commands.Choice(name="Absent", value="Absent"),
+            app_commands.Choice(name="No Show", value="No Show")
+        ])
+        @has_required_role()
+        async def activityedit_command(
+            interaction: discord.Interaction,
+            event_id: str,
+            user: discord.Member,
+            status: str
+        ):
+            """Edit a user's activity status for a specific event."""
+            await interaction.response.defer()
+
+            try:
+                with get_db_session() as session:
+                    # Check if event exists
+                    event = session.query(RaidHelperEvent).filter(
+                        RaidHelperEvent.id == event_id
+                    ).first()
+
+                    if not event:
+                        await interaction.followup.send(
+                            f"❌ Event with ID {event_id} not found.",
+                            ephemeral=True
+                        )
+                        return
+
+                    # Find user's signup entry
+                    signup = session.query(RaidHelperSignup).filter(
+                        RaidHelperSignup.event_id == event_id,
+                        RaidHelperSignup.user_id == str(user.id)
+                    ).first()
+
+                    if not signup:
+                        await interaction.followup.send(
+                            f"❌ No signup found for {user.display_name} in this event.",
+                            ephemeral=True
+                        )
+                        return
+
+                    # Store old status for message
+                    old_status = signup.class_name or "No Info"
+
+                    # Update status
+                    signup.class_name = status
+                    signup.updated_at = datetime.utcnow()
+                    
+                    # Remove event from processed_events table
+                    processed_event = session.query(ProcessedEvent).filter(
+                        ProcessedEvent.event_id == event_id
+                    ).first()
+                    if processed_event:
+                        session.delete(processed_event)
+                    
+                    session.commit()
+
+                    # Create embed message for confirmation
+                    embed = discord.Embed(
+                        title="Activity Status Updated",
+                        color=discord.Color.green(),
+                        timestamp=datetime.utcnow()
+                    )
+                    embed.add_field(name="Event", value=event.title, inline=False)
+                    embed.add_field(name="User", value=user.mention, inline=True)
+                    embed.add_field(name="Old Status", value=old_status, inline=True)
+                    embed.add_field(name="New Status", value=status, inline=True)
+                    embed.set_footer(text=f"Event ID: {event_id}")
+
+                    # Reprocess the event
+                    raidhelper_service = RaidHelperService()
+                    await raidhelper_service.process_closed_event(event, [])
+                    
+                    # Mark event as processed again
+                    mark_event_as_processed(session, event_id)
+
+                    await interaction.followup.send(embed=embed)
+
+            except Exception as e:
+                logging.error(f"Error in activityedit command: {e}")
+                await interaction.followup.send(
+                    "❌ An error occurred while updating the activity status.",
+                    ephemeral=True
+                )
 
         # Sync the commands
         synced = await self.tree.sync(guild=guild)
