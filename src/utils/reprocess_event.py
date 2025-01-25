@@ -7,6 +7,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
 import logging
+import asyncio
 from src.database.connection import get_db_session
 from src.database.models import ProcessedEvent, RaidHelperEvent, RaidHelperSignup
 from src.services.raidhelper import RaidHelperService
@@ -17,7 +18,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-def reprocess_event(event_id: str):
+async def reprocess_event(event_id: str):
     """Remove event from processed_events and process it again."""
     with get_db_session() as session:
         # Remove from processed_events
@@ -44,7 +45,7 @@ def reprocess_event(event_id: str):
         rh_service = RaidHelperService()
         
         # Process event with signups
-        rh_service.process_closed_event(event, signups)
+        await rh_service.process_closed_event(event, signups)
         logging.info(f"Successfully reprocessed event {event_id}")
 
 if __name__ == "__main__":
@@ -53,4 +54,4 @@ if __name__ == "__main__":
         sys.exit(1)
     
     event_id = sys.argv[1]
-    reprocess_event(event_id) 
+    asyncio.run(reprocess_event(event_id)) 
