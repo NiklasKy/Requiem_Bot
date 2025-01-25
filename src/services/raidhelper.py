@@ -219,57 +219,34 @@ class RaidHelperService:
                         # Create or update event
                         event = create_or_update_raidhelper_event(session, event_data)
                         
-                        # First update existing signups from RaidHelper
-                        signups_data = event_details.get("signups", [])
-                        logging.info(f"Updating {len(signups_data)} signups for event {event_id}")
+                        # Update signups using the existing function
+                        signups_data = event_details.get("signUps", [])
                         
-                        # Get existing signups for this event
-                        existing_signups = {
-                            signup.user_id: signup 
-                            for signup in session.query(RaidHelperSignup).filter(
-                                RaidHelperSignup.event_id == str(event_id)
-                            ).all()
-                        }
-                        
-                        # Track processed user IDs
-                        processed_user_ids = set()
-                        
-                        # Update or create signups
-                        for signup_data in signups_data:
-                            user_id = signup_data["userId"]
-                            processed_user_ids.add(user_id)
+                        # Transform the data to match the expected format
+                        transformed_signups = []
+                        for signup in signups_data:
+                            # Debug logging
+                            logging.debug(f"Processing signup: {signup}")
                             
-                            if user_id in existing_signups:
-                                # Update existing signup
-                                signup = existing_signups[user_id]
-                                signup.user_name = signup_data["name"]
-                                signup.entry_time = datetime.fromtimestamp(int(signup_data["entryTime"]))
-                                signup.status = signup_data["status"]
-                                signup.class_name = signup_data.get("className", "")
-                                signup.spec_name = signup_data.get("specName", "")
-                                signup.position = signup_data.get("position", 0)
-                                signup.updated_at = datetime.utcnow()
-                                logging.info(f"Updated signup for user {user_id} in event {event_id}")
-                            else:
-                                # Create new signup
-                                new_signup = RaidHelperSignup(
-                                    event_id=str(event_id),
-                                    user_id=user_id,
-                                    user_name=signup_data["name"],
-                                    entry_time=datetime.fromtimestamp(int(signup_data["entryTime"])),
-                                    status=signup_data["status"],
-                                    class_name=signup_data.get("className", ""),
-                                    spec_name=signup_data.get("specName", ""),
-                                    position=signup_data.get("position", 0)
-                                )
-                                session.add(new_signup)
-                                logging.info(f"Created new signup for user {user_id} in event {event_id}")
+                            # Extract class and spec info
+                            class_info = signup.get("class", {})
+                            class_name = class_info.get("name", "")
+                            spec_name = class_info.get("spec", {}).get("name", "")
+                            
+                            transformed_signup = {
+                                "userId": signup["userId"],
+                                "name": signup["name"],
+                                "entryTime": signup["entryTime"],
+                                "status": signup["status"],
+                                "className": class_name,
+                                "specName": spec_name,
+                                "position": signup.get("position", 0)
+                            }
+                            transformed_signups.append(transformed_signup)
+                            logging.debug(f"Transformed signup: {transformed_signup}")
                         
-                        # Remove signups that no longer exist in RaidHelper
-                        for user_id, signup in existing_signups.items():
-                            if user_id not in processed_user_ids and signup.class_name != "No Info":
-                                session.delete(signup)
-                                logging.info(f"Removed signup for user {user_id} from event {event_id}")
+                        logging.info(f"Updating {len(transformed_signups)} signups for event {event_id}")
+                        update_raidhelper_signups(session, str(event_id), transformed_signups)
                         
                         session.flush()  # Ensure all updates are visible
                         
@@ -290,7 +267,7 @@ class RaidHelperService:
                                 mark_event_as_processed(session, str(event.id))
                             except Exception as e:
                                 logging.error(f"Error processing closed event {event.id}: {e}")
-
+                    
                     session.commit()
                 except Exception as e:
                     logging.error(f"Error in sync_active_events: {e}")

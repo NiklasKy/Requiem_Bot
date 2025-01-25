@@ -95,10 +95,9 @@ async def sync_event(event_id: str):
                 user_name=signup.get("name", ""),
                 spec_name=signup.get("specName", ""),
                 class_name=signup.get("className", ""),
-                role=signup.get("className", ""),  # Using className as role since that's what we have
                 status=signup.get("status", ""),
                 signup_time=convert_timestamp(signup.get("entryTime")),
-                tentative=False  # Default to False as we don't have this info
+                entry_time=convert_timestamp(signup.get("entryTime"))
             )
             session.add(signup_data)
         
