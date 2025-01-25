@@ -22,10 +22,9 @@ services:
     stop_signal: SIGTERM
     command: |
       bash -c '
-        chmod +x /scripts/backup_db.sh
-        docker-entrypoint.sh postgres &
-        trap "/scripts/backup_db.sh; exit 0" SIGTERM
-        wait $!'
+        chmod +x /scripts/backup_db.sh &&
+        /scripts/backup_db.sh &
+        docker-entrypoint.sh postgres'
     restart: unless-stopped
     logging:
       driver: "json-file"
