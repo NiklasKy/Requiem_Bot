@@ -373,11 +373,11 @@ class RequiemBot(commands.Bot):
         @app_commands.describe(
             event_id="The event ID",
             user="The user whose status should be changed",
-            status="The new status (Present, Absent, No Show)"
+            status="The new status (Present, Absence, No Show)"
         )
         @app_commands.choices(status=[
             app_commands.Choice(name="Present", value="Present"),
-            app_commands.Choice(name="Absent", value="Absent"),
+            app_commands.Choice(name="Absence", value="Absence"),
             app_commands.Choice(name="No Show", value="No Show")
         ])
         @has_required_role()
