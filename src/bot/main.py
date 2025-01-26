@@ -242,7 +242,7 @@ class RequiemBot(commands.Bot):
         @has_required_role()
         async def guildadd_command(
             interaction: discord.Interaction,
-            user: Union[discord.Member, str],
+            user: app_commands.Transform[Union[discord.Member, str]],
             guild: str,
             send_welcome: bool = True
         ):
@@ -320,7 +320,7 @@ class RequiemBot(commands.Bot):
         @has_required_role()
         async def guildremove_command(
             interaction: discord.Interaction,
-            user: Union[discord.Member, str],
+            user: app_commands.Transform[Union[discord.Member, str]],
             guild: str,
             kick_from_discord: bool = False
         ):
