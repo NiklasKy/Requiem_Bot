@@ -28,7 +28,7 @@ from src.database.operations import (delete_afk_entries, get_active_afk,
                                    get_user_event_history, mark_event_as_processed)
 from src.utils.time_parser import parse_date, parse_time, parse_datetime
 from src.services.raidhelper import RaidHelperService
-from src.services.googlesheets import GoogleSheetsService
+from src.services.google_sheets import GoogleSheetsService
 
 # Create logs directory if it doesn't exist
 os.makedirs("logs", exist_ok=True)
@@ -1457,6 +1457,8 @@ async def guildadd(
 ):
     """Add a user to a guild."""
     try:
+        await interaction.response.defer()
+        
         # Convert guild name to role ID
         guild = guild.lower()
         if guild in CLAN1_ALIASES:
@@ -1470,7 +1472,7 @@ async def guildadd(
             guild_role = interaction.guild.get_role(CLAN2_ROLE_ID)
             additional_role_ids = CLAN2_ADDITIONAL_ROLES
         else:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ Invalid guild name. Please use one of: {', '.join(CLAN1_ALIASES + CLAN2_ALIASES)}",
                 ephemeral=True
             )
@@ -1501,37 +1503,43 @@ async def guildadd(
                         roles_added.append(role)
                 
                 # Send welcome message if enabled
+                welcome_msg_sent = False
                 if send_welcome:
                     welcome_msg = get_guild_welcome_message(db, guild_role_id)
                     if welcome_msg:
                         try:
                             await user.send(welcome_msg)
+                            welcome_msg_sent = True
                         except discord.Forbidden:
-                            await interaction.followup.send(
-                                "⚠️ Could not send welcome message to user (DMs might be disabled)",
-                                ephemeral=True
-                            )
+                            pass  # Will handle this in the response message
                 
                 # Create success message with added roles
                 roles_text = ", ".join(role.name for role in roles_added)
-                await interaction.response.send_message(
-                    f"✅ Successfully added {user.mention} to {guild_name}!\n"
-                    f"Added roles: {roles_text}",
-                    ephemeral=False
-                )
+                response = f"✅ Successfully added {user.mention} to {guild_name}!\nAdded roles: {roles_text}"
+                
+                if send_welcome and not welcome_msg_sent:
+                    response += "\n⚠️ Could not send welcome message to user (DMs might be disabled)"
+                
+                await interaction.followup.send(response, ephemeral=False)
                 
             except ValueError as e:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"❌ {str(e)}",
                     ephemeral=True
                 )
             
     except Exception as e:
         logging.error(f"Error in guildadd command: {e}")
-        await interaction.response.send_message(
-            f"❌ An error occurred: {str(e)}",
-            ephemeral=True
-        )
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                f"❌ An error occurred: {str(e)}",
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send(
+                f"❌ An error occurred: {str(e)}",
+                ephemeral=True
+            )
 
 async def setwelcome(
     interaction: discord.Interaction,
