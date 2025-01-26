@@ -75,6 +75,38 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres")
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 engine = create_engine(DATABASE_URL)
 
+class MemberTransformer(app_commands.Transformer):
+    async def transform(self, interaction: discord.Interaction, value: str) -> discord.Member:
+        """Transform a string value into a Discord Member object.
+        
+        Args:
+            interaction: The Discord interaction context
+            value: The input string (can be Discord ID, @mention, or username)
+            
+        Returns:
+            discord.Member: The found member object
+            
+        Raises:
+            TransformerError: If the member cannot be found
+        """
+        try:
+            # First try as Discord ID or mention
+            if value.startswith('<@') and value.endswith('>'):
+                user_id = int(value.strip('<@!>'))
+            else:
+                user_id = int(value)
+            return await interaction.guild.fetch_member(user_id)
+        except (ValueError, discord.NotFound):
+            # If that fails, try searching by username
+            members = await interaction.guild.fetch_members().flatten()
+            member = discord.utils.get(members, name=value)
+            if member is None:
+                raise app_commands.TransformerError(
+                    value, self.type, self,
+                    message=f"Could not find user '{value}'. Please use a Discord ID or @mention."
+                )
+            return member
+
 class RequiemBot(commands.Bot):
     """Main bot class."""
     def __init__(self):
@@ -242,31 +274,12 @@ class RequiemBot(commands.Bot):
         @has_required_role()
         async def guildadd_command(
             interaction: discord.Interaction,
-            user: app_commands.Transform[Union[discord.Member, str]],
+            user: app_commands.Transform[discord.Member, MemberTransformer],
             guild: str,
             send_welcome: bool = True
         ):
             await interaction.response.defer()
-            
             try:
-                # Wenn user ein String ist, versuche den Member zu finden
-                if isinstance(user, str):
-                    try:
-                        # Versuche zuerst als Discord ID
-                        user_id = int(user.strip("<@!>"))  # Entfernt <@!> falls es eine Mention ist
-                        user = await interaction.guild.fetch_member(user_id)
-                    except (ValueError, discord.NotFound):
-                        # Wenn das fehlschlägt, suche nach dem Namen
-                        members = await interaction.guild.fetch_members().flatten()
-                        user = discord.utils.get(members, name=user)
-                        if not user:
-                            await interaction.followup.send(
-                                f"❌ Benutzer '{user}' konnte nicht gefunden werden. "
-                                "Bitte verwende die Discord ID oder @mention.", 
-                                ephemeral=True
-                            )
-                            return
-
                 await guildadd(interaction, user, guild, send_welcome)
             except Exception as e:
                 logging.error(f"Error in guildadd_command: {e}")
@@ -320,31 +333,12 @@ class RequiemBot(commands.Bot):
         @has_required_role()
         async def guildremove_command(
             interaction: discord.Interaction,
-            user: app_commands.Transform[Union[discord.Member, str]],
+            user: app_commands.Transform[discord.Member, MemberTransformer],
             guild: str,
             kick_from_discord: bool = False
         ):
             await interaction.response.defer()
-            
             try:
-                # Wenn user ein String ist, versuche den Member zu finden
-                if isinstance(user, str):
-                    try:
-                        # Versuche zuerst als Discord ID
-                        user_id = int(user.strip("<@!>"))  # Entfernt <@!> falls es eine Mention ist
-                        user = await interaction.guild.fetch_member(user_id)
-                    except (ValueError, discord.NotFound):
-                        # Wenn das fehlschlägt, suche nach dem Namen
-                        members = await interaction.guild.fetch_members().flatten()
-                        user = discord.utils.get(members, name=user)
-                        if not user:
-                            await interaction.followup.send(
-                                f"❌ Benutzer '{user}' konnte nicht gefunden werden. "
-                                "Bitte verwende die Discord ID oder @mention.", 
-                                ephemeral=True
-                            )
-                            return
-
                 await guildremove(interaction, user, guild, kick_from_discord)
             except Exception as e:
                 logging.error(f"Error in guildremove_command: {e}")
