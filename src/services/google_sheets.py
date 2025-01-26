@@ -238,6 +238,9 @@ class GoogleSheetsService:
                     )
                     if afk_entry:
                         afk_status = f"AFK: {afk_entry.reason}"
+                        # Setze Status auf AFK wenn nicht "Present"
+                        if status != "Present":
+                            status = "AFK"
                 
                 # Format date and time in German format
                 event_date = event.end_time.strftime("%d.%m.%Y")
@@ -276,3 +279,60 @@ class GoogleSheetsService:
         rows = [row for _, row in temp_rows]
         
         return rows 
+
+    def update_status_in_sheet(self, event_id: str, user_id: str, new_status: str) -> bool:
+        """Update the status for a specific event and user in the sheet.
+        
+        Args:
+            event_id: The event ID to look for
+            user_id: The Discord user ID to look for
+            new_status: The new status to set
+            
+        Returns:
+            bool: True if the update was successful, False otherwise
+        """
+        try:
+            # Get all values from the sheet
+            range_name = f"{self.sheet_name}!A:H"
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range=range_name
+            ).execute()
+            values = result.get('values', [])
+            
+            if not values:
+                logging.error("No data found in sheet")
+                return False
+            
+            # Find the row with matching event_id and user_id
+            # Event ID is in column C (index 2), User ID is in column G (index 6)
+            # Status is in column H (index 7)
+            row_index = None
+            for i, row in enumerate(values):
+                if len(row) >= 8 and row[2] == event_id and row[6] == user_id:
+                    row_index = i
+                    break
+            
+            if row_index is None:
+                logging.error(f"No matching entry found for event {event_id} and user {user_id}")
+                return False
+            
+            # Update only the status column (H) for the found row
+            update_range = f"{self.sheet_name}!H{row_index + 1}"
+            body = {
+                'values': [[new_status]]
+            }
+            
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=update_range,
+                valueInputOption='RAW',
+                body=body
+            ).execute()
+            
+            logging.info(f"Successfully updated status to {new_status} for event {event_id} and user {user_id}")
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error updating status in sheet: {e}")
+            return False 

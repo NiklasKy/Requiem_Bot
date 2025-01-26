@@ -28,6 +28,7 @@ from src.database.operations import (delete_afk_entries, get_active_afk,
                                    get_user_event_history, mark_event_as_processed)
 from src.utils.time_parser import parse_date, parse_time, parse_datetime
 from src.services.raidhelper import RaidHelperService
+from src.services.googlesheets import GoogleSheetsService
 
 # Create logs directory if it doesn't exist
 os.makedirs("logs", exist_ok=True)
@@ -363,40 +364,36 @@ class RequiemBot(commands.Bot):
                         return
 
                     # Store old status for message
-                    old_status = signup.class_name or "No Info"
+                    old_status = signup.class_name or "No signup"
 
-                    # Update status
+                    # Update status in database
                     signup.class_name = status
                     signup.updated_at = datetime.utcnow()
-                    
-                    # Remove event from processed_events table
-                    processed_event = session.query(ProcessedEvent).filter(
-                        ProcessedEvent.event_id == event_id
-                    ).first()
-                    if processed_event:
-                        session.delete(processed_event)
-                    
                     session.commit()
+
+                    # Update status in Google Sheet
+                    sheets_service = GoogleSheetsService()
+                    sheet_updated = sheets_service.update_status_in_sheet(event_id, str(user.id), status)
 
                     # Create embed message for confirmation
                     embed = discord.Embed(
                         title="Activity Status Updated",
-                        color=discord.Color.green(),
+                        color=discord.Color.green() if sheet_updated else discord.Color.orange(),
                         timestamp=datetime.utcnow()
                     )
                     embed.add_field(name="Event", value=event.title, inline=False)
                     embed.add_field(name="User", value=user.mention, inline=True)
                     embed.add_field(name="Old Status", value=old_status, inline=True)
                     embed.add_field(name="New Status", value=status, inline=True)
-                    embed.set_footer(text=f"Event ID: {event_id}")
-
-                    # Reprocess the event
-                    raidhelper_service = RaidHelperService()
-                    await raidhelper_service.process_closed_event(event, [])
                     
-                    # Mark event as processed again
-                    mark_event_as_processed(session, event_id)
-
+                    if not sheet_updated:
+                        embed.add_field(
+                            name="⚠️ Warning",
+                            value="Status was updated in database but could not be updated in the Google Sheet. The sheet will be updated on next sync.",
+                            inline=False
+                        )
+                    
+                    embed.set_footer(text=f"Event ID: {event_id}")
                     await interaction.followup.send(embed=embed)
 
             except Exception as e:
