@@ -352,6 +352,12 @@ docker compose exec db pg_restore -U postgres -v -d postgres /backups/backup.dum
 
 ### Available Commands
 
+#### Activity Tracking
+- `/activityedit <event_id> <user> <status>`: Edit a user's activity status for an event (Admin/Officer only)
+  - `event_id`: The Raid-Helper event ID
+  - `user`: The user whose status should be changed
+  - `status`: New status (Present, Absent, No Show)
+
 #### AFK Management
 - `/afk <start_date> <start_time> <end_date> <end_time> <reason>`: Set AFK status with specific dates
 - `/afkquick <reason> [days]`: Quick AFK until end of day (or specified number of days)
@@ -375,6 +381,20 @@ docker compose exec db pg_restore -U postgres -v -d postgres /backups/backup.dum
 - `/checksignups <role> <event_id>`: Compare role members with Raid-Helper signups (Admin/Officer only)
 - `/clanhistory [user] [include_inactive]`: Show clan membership history (Admin/Officer only)
 - `/clanchanges [clan] [days]`: Show recent clan membership changes (Admin/Officer only)
+
+### Command Parameters
+
+#### /activityedit
+- `event_id`: The Raid-Helper event ID to edit
+- `user`: The user whose status should be changed
+- `status`: The new status (choices: Present, Absent, No Show)
+
+#### /afk
+- `start_date`: Start date (DDMM, DD/MM or DD.MM)
+- `start_time`: Start time (HHMM or HH:MM)
+- `end_date`: End date (DDMM, DD/MM or DD.MM)
+- `end_time`: End time (HHMM or HH:MM)
+- `reason`: Reason for being AFK
 
 ## Clan Tracking Features
 
@@ -422,7 +442,7 @@ Response:
 GET /api/clan/{clan_role_id}/current
 ```
 
-Response: Same as above, but only includes active members.
+Response format is the same as above.
 
 Authentication:
 All API endpoints require a Bearer token in the Authorization header:
@@ -618,3 +638,28 @@ Set welcome message for a guild (Admin only)
 #### `/welcomeshow`
 Show welcome messages for all guilds (Admin/Officer only)
 - `guild`: Optional: Show message for specific guild only 
+
+## Recent Updates
+
+### Activity Tracking Improvements
+- Enhanced status handling in Google Sheets:
+  - Direct status updates in the sheet when using `/activityedit`
+  - Improved AFK status display with reason
+  - Better sorting of entries by guild (Requiem Main first, then Requiem North)
+  - Changed "No Info" to "No signup" for better clarity
+  - Status is now set to "Present" for Tank/DPS/Healer roles
+  - AFK status is displayed when applicable and user is not marked as "Present"
+
+### Command Improvements
+- `/activityedit` command now:
+  - Updates the database entry
+  - Directly modifies the corresponding row in the Google Sheet
+  - Provides visual feedback with color-coded embeds
+  - Shows warnings if sheet update fails
+  - Preserves AFK status information
+
+### Bug Fixes
+- Fixed interaction timeout issues in guild management commands
+- Improved error handling for Discord API interactions
+- Corrected module import paths
+- Enhanced response handling for long-running commands 
