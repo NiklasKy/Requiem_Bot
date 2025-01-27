@@ -210,7 +210,11 @@ class RequiemBot(commands.Bot):
         async def afkremove_command(interaction, afk_id: int):
             await afkremove(interaction, afk_id)
 
-        @self.tree.command(name="checksignups", description="Compares role members with Raid-Helper signups", guild=guild)
+        @self.tree.command(
+            name="checksignups",
+            description="Compares role members with Raid-Helper signups",
+            guild=guild
+        )
         @app_commands.describe(
             role="The role to check members for",
             event_id="The Raid-Helper event ID"
@@ -267,14 +271,14 @@ class RequiemBot(commands.Bot):
             guild=guild
         )
         @app_commands.describe(
-            user="The user to add to the guild (Discord ID or @mention)",
+            user="The user to add to the guild",
             guild="The guild to add the user to",
             send_welcome="Send welcome message to user (default: True)"
         )
         @has_required_role()
         async def guildadd_command(
             interaction: discord.Interaction,
-            user: app_commands.Transform[discord.Member, MemberTransformer],
+            user: discord.Member,
             guild: str,
             send_welcome: bool = True
         ):
@@ -326,14 +330,14 @@ class RequiemBot(commands.Bot):
             guild=guild
         )
         @app_commands.describe(
-            user="The user to remove from the guild (Discord ID or @mention)",
+            user="The user to remove from the guild",
             guild="The guild to remove the user from",
             kick_from_discord="Also kick the user from Discord (default: False)"
         )
         @has_required_role()
         async def guildremove_command(
             interaction: discord.Interaction,
-            user: app_commands.Transform[discord.Member, MemberTransformer],
+            user: discord.Member,
             guild: str,
             kick_from_discord: bool = False
         ):
@@ -1803,6 +1807,90 @@ async def eventhistory(interaction: discord.Interaction, user: discord.Member, l
             )
         
         await interaction.followup.send(embed=embed)
+
+async def guildadd(
+    interaction: discord.Interaction,
+    user: discord.Member,
+    guild: str,
+    send_welcome: bool = True
+):
+    """Add a user to a guild."""
+    try:
+        # Convert guild name to role ID
+        guild = guild.lower()
+        if guild in CLAN1_ALIASES:
+            guild_role_id = str(CLAN1_ROLE_ID)
+            guild_name = CLAN1_NAME
+            guild_role = interaction.guild.get_role(CLAN1_ROLE_ID)
+            additional_role_ids = CLAN1_ADDITIONAL_ROLES
+        elif guild in CLAN2_ALIASES:
+            guild_role_id = str(CLAN2_ROLE_ID)
+            guild_name = CLAN2_NAME
+            guild_role = interaction.guild.get_role(CLAN2_ROLE_ID)
+            additional_role_ids = CLAN2_ADDITIONAL_ROLES
+        else:
+            await interaction.followup.send(
+                f"❌ Invalid guild name. Please use one of: {', '.join(CLAN1_ALIASES + CLAN2_ALIASES)}",
+                ephemeral=True
+            )
+            return
+
+        with get_db_session() as db:
+            # Get or create user in database
+            db_user = get_or_create_user(
+                db,
+                str(user.id),
+                user.name,
+                user.display_name
+            )
+            
+            try:
+                # Add user to guild in database
+                add_user_to_guild(db, db_user, guild_role_id)
+                
+                # Add main Discord role
+                await user.add_roles(guild_role)
+                
+                # Add additional roles
+                roles_added = [guild_role]
+                for role_id in additional_role_ids:
+                    role = interaction.guild.get_role(role_id)
+                    if role and role not in user.roles:
+                        await user.add_roles(role)
+                        roles_added.append(role)
+                
+                # Send welcome message if enabled
+                welcome_msg_sent = False
+                if send_welcome:
+                    welcome_msg = get_guild_welcome_message(db, guild_role_id)
+                    if welcome_msg:
+                        try:
+                            await user.send(welcome_msg)
+                            welcome_msg_sent = True
+                        except discord.Forbidden:
+                            pass  # Will handle this in the response message
+                
+                # Create success message with added roles
+                roles_text = ", ".join(role.name for role in roles_added)
+                response = f"✅ Successfully added {user.mention} to {guild_name}!\nAdded roles: {roles_text}"
+                
+                if send_welcome and not welcome_msg_sent:
+                    response += "\n⚠️ Could not send welcome message to user (DMs might be disabled)"
+                
+                await interaction.followup.send(response, ephemeral=False)
+                
+            except ValueError as e:
+                await interaction.followup.send(
+                    f"❌ {str(e)}",
+                    ephemeral=True
+                )
+            
+    except Exception as e:
+        logging.error(f"Error in guildadd command: {e}")
+        await interaction.followup.send(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
 
 def run_bot():
     """Run the bot."""
