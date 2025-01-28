@@ -455,6 +455,29 @@ class RequiemBot(commands.Bot):
                     ephemeral=True
                 )
 
+        @self.tree.command(
+            name="guildswitch",
+            description="Switch a user between guilds (Admin/Officer only)",
+            guild=guild
+        )
+        @app_commands.describe(
+            user="The user to switch guilds for"
+        )
+        @has_required_role()
+        async def guildswitch_command(
+            interaction: discord.Interaction,
+            user: discord.Member
+        ):
+            await interaction.response.defer()
+            try:
+                await guildswitch(interaction, user)
+            except Exception as e:
+                logging.error(f"Error in guildswitch_command: {e}")
+                await interaction.followup.send(
+                    f"❌ Ein Fehler ist aufgetreten: {str(e)}", 
+                    ephemeral=True
+                )
+
         # Sync the commands
         synced = await self.tree.sync(guild=guild)
         
@@ -1679,7 +1702,7 @@ async def welcomeshow(
     except Exception as e:
         logging.error(f"Error in welcomeshow command: {e}")
         if not interaction.response.is_done():
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ An error occurred: {str(e)}",
                 ephemeral=True
             )
@@ -1891,6 +1914,96 @@ async def guildadd(
             f"❌ An error occurred: {str(e)}",
             ephemeral=True
         )
+
+async def guildswitch(
+    interaction: discord.Interaction,
+    user: discord.Member
+):
+    """Switch a user between guilds."""
+    try:
+        # Get current guild roles
+        clan1_role = interaction.guild.get_role(CLAN1_ROLE_ID)
+        clan2_role = interaction.guild.get_role(CLAN2_ROLE_ID)
+        
+        if not clan1_role or not clan2_role:
+            await interaction.followup.send(
+                "❌ Could not find guild roles. Please check role configuration.",
+                ephemeral=True
+            )
+            return
+
+        # Check which guild the user is currently in
+        is_in_clan1 = clan1_role in user.roles
+        is_in_clan2 = clan2_role in user.roles
+
+        if not is_in_clan1 and not is_in_clan2:
+            await interaction.followup.send(
+                f"❌ {user.mention} is not in any guild. Use `/guildadd` to add them to a guild first.",
+                ephemeral=True
+            )
+            return
+
+        with get_db_session() as db:
+            # Get or create user in database
+            db_user = get_or_create_user(
+                db,
+                str(user.id),
+                user.name,
+                user.display_name
+            )
+
+            if is_in_clan1:
+                # Switch from Clan 1 to Clan 2
+                # Remove from Clan 1
+                await user.remove_roles(clan1_role)
+                for role_id in CLAN1_ADDITIONAL_ROLES:
+                    role = interaction.guild.get_role(role_id)
+                    if role and role in user.roles:
+                        await user.remove_roles(role)
+                
+                # Add to Clan 2
+                await user.add_roles(clan2_role)
+                for role_id in CLAN2_ADDITIONAL_ROLES:
+                    role = interaction.guild.get_role(role_id)
+                    if role and role not in user.roles:
+                        await user.add_roles(role)
+                
+                # Update database
+                remove_user_from_guild(db, db_user, str(CLAN1_ROLE_ID))
+                add_user_to_guild(db, db_user, str(CLAN2_ROLE_ID))
+                
+                await interaction.followup.send(
+                    f"✅ Successfully switched {user.mention} from {CLAN1_NAME} to {CLAN2_NAME}",
+                    ephemeral=False
+                )
+            else:
+                # Switch from Clan 2 to Clan 1
+                # Remove from Clan 2
+                await user.remove_roles(clan2_role)
+                for role_id in CLAN2_ADDITIONAL_ROLES:
+                    role = interaction.guild.get_role(role_id)
+                    if role and role in user.roles:
+                        await user.remove_roles(role)
+                
+                # Add to Clan 1
+                await user.add_roles(clan1_role)
+                for role_id in CLAN1_ADDITIONAL_ROLES:
+                    role = interaction.guild.get_role(role_id)
+                    if role and role not in user.roles:
+                        await user.add_roles(role)
+                
+                # Update database
+                remove_user_from_guild(db, db_user, str(CLAN2_ROLE_ID))
+                add_user_to_guild(db, db_user, str(CLAN1_ROLE_ID))
+                
+                await interaction.followup.send(
+                    f"✅ Successfully switched {user.mention} from {CLAN2_NAME} to {CLAN1_NAME}",
+                    ephemeral=False
+                )
+
+    except Exception as e:
+        logging.error(f"Error in guildswitch: {e}")
+        raise
 
 def run_bot():
     """Run the bot."""
