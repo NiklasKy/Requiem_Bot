@@ -1413,74 +1413,109 @@ async def clan_changes(
 ):
     """Show recent clan membership changes."""
     try:
+        await interaction.response.defer()
+        
+        # Convert clan name to role ID if provided
+        clan_role_id = None
+        if clan:
+            clan = clan.lower()
+            if clan in CLAN1_ALIASES:
+                clan_role_id = str(CLAN1_ROLE_ID)
+            elif clan in CLAN2_ALIASES:
+                clan_role_id = str(CLAN2_ROLE_ID)
+            else:
+                await interaction.followup.send(
+                    f"❌ Invalid clan name. Please use one of: {', '.join(CLAN1_ALIASES + CLAN2_ALIASES)}",
+                    ephemeral=True
+                )
+                return
+        
+        # Calculate date range
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=days)
+        
         with get_db_session() as db:
-            # Convert clan name to role ID
-            clan_role_id = None
-            if clan:
-                clan = clan.lower()
-                if clan in CLAN1_ALIASES:
-                    clan_role_id = str(CLAN1_ROLE_ID)
-                elif clan in CLAN2_ALIASES:
-                    clan_role_id = str(CLAN2_ROLE_ID)
-            
-            # Calculate date range
-            end_date = datetime.utcnow()
-            start_date = end_date - timedelta(days=days)
-            
-            # Get changes
-            changes = get_clan_membership_history(
+            changes = get_clan_membership_changes(
                 db,
                 clan_role_id=clan_role_id,
                 start_date=start_date,
-                end_date=end_date,
-                include_inactive=True
+                end_date=end_date
             )
             
             if not changes:
-                await interaction.response.send_message(
-                    f"No changes in the last {days} days.",
+                await interaction.followup.send(
+                    f"No clan changes found in the last {days} days.",
                     ephemeral=True
                 )
                 return
             
-            # Create embed
-            embed = discord.Embed(
-                title=f"Clan Changes in the Last {days} Days",
-                color=discord.Color.blue()
-            )
-            
-            for user_obj, membership in changes:
-                clan_name = (
-                    CLAN1_NAME if membership.clan_role_id == str(CLAN1_ROLE_ID) else
-                    CLAN2_NAME if membership.clan_role_id == str(CLAN2_ROLE_ID) else
-                    membership.clan_role_id
+            # Gruppiere Änderungen nach Clan
+            clan_groups = {}
+            for user, membership in changes:
+                clan_name = "Unknown"
+                if membership.clan_role_id == str(CLAN1_ROLE_ID):
+                    clan_name = CLAN1_NAME
+                elif membership.clan_role_id == str(CLAN2_ROLE_ID):
+                    clan_name = CLAN2_NAME
+                
+                if clan_name not in clan_groups:
+                    clan_groups[clan_name] = []
+                clan_groups[clan_name].append((user, membership))
+
+            # Erstelle Embeds für jeden Clan
+            embeds = []
+            for clan_name, clan_changes in clan_groups.items():
+                current_embed = discord.Embed(
+                    title=f"Clan Changes - {clan_name}",
+                    description=f"Changes in the last {days} days",
+                    color=discord.Color.blue()
                 )
+                field_count = 0
                 
-                member = interaction.guild.get_member(int(user_obj.discord_id))
-                user_name = member.display_name if member else user_obj.display_name
-                
-                if membership.left_at and membership.left_at >= start_date:
-                    # Member left during the period
-                    embed.add_field(
-                        name=f"🔴 {user_name} left {clan_name}",
-                        value=f"<t:{int(membership.left_at.timestamp())}:f>",
+                for user, membership in clan_changes:
+                    # Wenn das aktuelle Embed voll ist (20 Felder), erstelle ein neues
+                    if field_count >= 20:
+                        embeds.append(current_embed)
+                        current_embed = discord.Embed(
+                            title=f"Clan Changes - {clan_name} (Continued)",
+                            description=f"Changes in the last {days} days",
+                            color=discord.Color.blue()
+                        )
+                        field_count = 0
+                    
+                    # Formatiere den Zeitstempel für joined_at
+                    joined_str = f"<t:{int(membership.joined_at.timestamp())}:f>"
+                    
+                    # Formatiere den Zeitstempel für left_at, falls vorhanden
+                    status = "Joined"
+                    if membership.left_at:
+                        status = "Left"
+                        timestamp = f"<t:{int(membership.left_at.timestamp())}:f>"
+                    else:
+                        timestamp = joined_str
+                    
+                    field_name = f"{status}: {user.username}"
+                    field_value = f"Time: {timestamp}\nDiscord ID: {user.discord_id}"
+                    
+                    current_embed.add_field(
+                        name=field_name,
+                        value=field_value,
                         inline=False
                     )
+                    field_count += 1
                 
-                if membership.joined_at >= start_date:
-                    # Member joined during the period
-                    embed.add_field(
-                        name=f"🟢 {user_name} joined {clan_name}",
-                        value=f"<t:{int(membership.joined_at.timestamp())}:f>",
-                        inline=False
-                    )
+                # Füge das letzte Embed hinzu, wenn es Felder enthält
+                if field_count > 0:
+                    embeds.append(current_embed)
             
-            await interaction.response.send_message(embed=embed)
-    
+            # Sende alle Embeds
+            for embed in embeds:
+                await interaction.followup.send(embed=embed)
+            
     except Exception as e:
         logging.error(f"Error showing clan changes: {e}")
-        await interaction.response.send_message(
-            "An error occurred. Please try again later.",
+        await interaction.followup.send(
+            "❌ An error occurred while showing clan changes.",
             ephemeral=True
         )
 
