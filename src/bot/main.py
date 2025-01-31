@@ -474,7 +474,7 @@ class RequiemBot(commands.Bot):
             except Exception as e:
                 logging.error(f"Error in guildswitch_command: {e}")
                 await interaction.followup.send(
-                    f"❌ Ein Fehler ist aufgetreten: {str(e)}", 
+                    f"❌ An error occurred: {str(e)}", 
                     ephemeral=True
                 )
 
