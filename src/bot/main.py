@@ -1488,26 +1488,23 @@ async def clan_changes(
                     joined_str = f"<t:{int(membership.joined_at.timestamp())}:f>"
                     
                     # Formatiere den Zeitstempel für left_at, falls vorhanden
-                    status = "Joined"
                     if membership.left_at:
-                        status = "Left"
+                        status = "🔴 Left"
                         timestamp = f"<t:{int(membership.left_at.timestamp())}:f>"
+                        field_color = discord.Color.red()
                     else:
+                        status = "🟢 Joined"
                         timestamp = joined_str
+                        field_color = discord.Color.green()
                     
-                    field_name = f"{status}: {user.username}"
-                    field_value = f"Time: {timestamp}\nDiscord ID: {user.discord_id}"
-                    
-                    current_embed.add_field(
-                        name=field_name,
-                        value=field_value,
-                        inline=False
+                    # Erstelle ein neues Embed für jeden Eintrag
+                    entry_embed = discord.Embed(
+                        title=f"{status}: {user.username}",
+                        description=f"Time: {timestamp}\nDiscord ID: {user.discord_id}",
+                        color=field_color
                     )
+                    embeds.append(entry_embed)
                     field_count += 1
-                
-                # Füge das letzte Embed hinzu, wenn es Felder enthält
-                if field_count > 0:
-                    embeds.append(current_embed)
             
             # Sende alle Embeds
             for embed in embeds:
