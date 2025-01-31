@@ -1435,11 +1435,12 @@ async def clan_changes(
         start_date = end_date - timedelta(days=days)
         
         with get_db_session() as db:
-            changes = get_clan_membership_changes(
+            changes = get_clan_membership_history(
                 db,
                 clan_role_id=clan_role_id,
                 start_date=start_date,
-                end_date=end_date
+                end_date=end_date,
+                include_inactive=True
             )
             
             if not changes:
