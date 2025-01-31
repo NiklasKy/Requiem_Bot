@@ -1471,40 +1471,30 @@ async def clan_changes(
                     description=f"Changes in the last {days} days",
                     color=discord.Color.blue()
                 )
-                field_count = 0
                 
                 for user, membership in clan_changes:
-                    # Wenn das aktuelle Embed voll ist (20 Felder), erstelle ein neues
-                    if field_count >= 20:
-                        embeds.append(current_embed)
-                        current_embed = discord.Embed(
-                            title=f"Clan Changes - {clan_name} (Continued)",
-                            description=f"Changes in the last {days} days",
-                            color=discord.Color.blue()
-                        )
-                        field_count = 0
-                    
                     # Formatiere den Zeitstempel für joined_at
                     joined_str = f"<t:{int(membership.joined_at.timestamp())}:f>"
                     
                     # Formatiere den Zeitstempel für left_at, falls vorhanden
                     if membership.left_at:
-                        status = "🔴 Left"
+                        status = "🔴"
                         timestamp = f"<t:{int(membership.left_at.timestamp())}:f>"
-                        field_color = discord.Color.red()
+                        field_name = f"{status} Left: {user.username}"
                     else:
-                        status = "🟢 Joined"
+                        status = "🟢"
                         timestamp = joined_str
-                        field_color = discord.Color.green()
+                        field_name = f"{status} Joined: {user.username}"
                     
-                    # Erstelle ein neues Embed für jeden Eintrag
-                    entry_embed = discord.Embed(
-                        title=f"{status}: {user.username}",
-                        description=f"Time: {timestamp}\nDiscord ID: {user.discord_id}",
-                        color=field_color
+                    field_value = f"Time: {timestamp}\nDiscord ID: {user.discord_id}"
+                    
+                    current_embed.add_field(
+                        name=field_name,
+                        value=field_value,
+                        inline=False
                     )
-                    embeds.append(entry_embed)
-                    field_count += 1
+                
+                embeds.append(current_embed)
             
             # Sende alle Embeds
             for embed in embeds:
