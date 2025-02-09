@@ -663,3 +663,51 @@ Show welcome messages for all guilds (Admin/Officer only)
 - Improved error handling for Discord API interactions
 - Corrected module import paths
 - Enhanced response handling for long-running commands 
+
+## Bot Permissions
+
+When inviting the bot to a new Discord server, ensure it has the following permissions:
+
+### Required Permissions
+- **General Permissions**
+  - View Channels
+  - Manage Roles (for guild management)
+  - Read Message History
+  - Add Reactions
+
+- **Text Channel Permissions**
+  - Send Messages
+  - Send Messages in Threads
+  - Create Public Threads
+  - Create Private Threads
+  - Embed Links
+  - Attach Files
+  - Read Message History
+  - Use Slash Commands
+
+- **Member Permissions**
+  - Kick Members (optional, only if using kick functionality with /guildremove)
+  - View Member Insights
+  - Manage Nicknames
+
+### Permission Integer
+You can use the following permission integer when creating an invite link:
+```
+412317240384
+```
+
+### Invite Link Setup
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications)
+2. Select your bot application
+3. Navigate to "OAuth2" → "URL Generator"
+4. Select the following scopes:
+   - `bot`
+   - `applications.commands`
+5. Select the permissions listed above
+6. Use the generated URL to invite the bot
+
+### Post-Invite Setup
+After inviting the bot:
+1. Ensure the bot's role is positioned above any roles it needs to manage
+2. Configure the required environment variables (ADMIN_ROLE_ID, OFFICER_ROLE_ID, etc.)
+3. Set up the clan roles and their IDs in the environment configuration 
