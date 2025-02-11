@@ -2077,6 +2077,52 @@ async def guildswitch(
         logging.error(f"Error in guildswitch: {e}")
         raise
 
+async def eventhistory(interaction: discord.Interaction, user: discord.Member, limit: int = 10):
+    """Show event history for a user."""
+    try:
+        await interaction.response.defer()
+        
+        with get_db_session() as db:
+            # Get event history from database
+            signups = get_user_event_history(db, str(user.id), limit)
+            
+            if not signups:
+                await interaction.followup.send(
+                    f"📝 No event history found for {user.display_name}.",
+                    ephemeral=True
+                )
+                return
+            
+            # Create embed
+            embed = discord.Embed(
+                title=f"📅 Event History - {user.display_name}",
+                description=f"Showing last {limit} events",
+                color=discord.Color.blue()
+            )
+            
+            # Add fields for each event
+            for signup in signups:
+                event = db.query(RaidHelperEvent).filter(RaidHelperEvent.id == signup.event_id).first()
+                if event:
+                    embed.add_field(
+                        name=event.title,
+                        value=(
+                            f"Time: <t:{int(event.start_time.timestamp())}:f>\n"
+                            f"Status: {signup.class_name or 'No status'}\n"
+                            f"Event ID: {event.id}"
+                        ),
+                        inline=False
+                    )
+            
+            await interaction.followup.send(embed=embed)
+            
+    except Exception as e:
+        logging.error(f"Error in eventhistory command: {e}")
+        await interaction.followup.send(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
+
 def run_bot():
     """Run the bot."""
     try:
