@@ -696,9 +696,13 @@ def extend_afk(
     # Calculate new end date
     afk_entry.end_date = afk_entry.end_date + timedelta(hours=hours)
     
+    # Update is_active based on current time and start date
+    current_time = datetime.utcnow()
+    afk_entry.is_active = current_time >= afk_entry.start_date
+    
     db.commit()
     db.refresh(afk_entry)
-    return afk_entry 
+    return afk_entry
 
 def set_guild_welcome_message(
     db: Session,
