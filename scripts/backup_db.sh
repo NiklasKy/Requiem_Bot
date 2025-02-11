@@ -1,20 +1,23 @@
 #!/bin/bash
 
-# Get current date for backup file name
-BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="/backups/db_backup_${BACKUP_DATE}.sql"
+# Setze Fehlererkennung
+set -e
 
-# Create backup directory if it doesn't exist
-mkdir -p /backups
+# Backup-Verzeichnis
+BACKUP_DIR="/backups"
 
-# Create backup
-echo "Creating database backup: ${BACKUP_FILE}"
-pg_dump -h db -U ${POSTGRES_USER} ${POSTGRES_DB} > ${BACKUP_FILE}
+# Aktuelles Datum für den Dateinamen
+DATE=$(date +%Y%m%d_%H%M%S)
 
-# Compress backup
-gzip ${BACKUP_FILE}
-echo "Backup compressed: ${BACKUP_FILE}.gz"
+# Erstelle Backup-Verzeichnis falls es nicht existiert
+mkdir -p $BACKUP_DIR
 
-# Delete old backups (keep last 7 days)
-find /backups -name "db_backup_*.sql.gz" -mtime +7 -delete
-echo "Old backups cleaned up" 
+# Erstelle Backup
+echo "Creating database backup..."
+pg_dump -U postgres ${POSTGRES_DB} | gzip > "$BACKUP_DIR/db_backup_${DATE}.sql.gz"
+
+# Lösche alte Backups (älter als 7 Tage)
+echo "Cleaning up old backups..."
+find $BACKUP_DIR -name "db_backup_*.sql.gz" -type f -mtime +7 -delete
+
+echo "Backup completed: db_backup_${DATE}.sql.gz" 
