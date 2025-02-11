@@ -671,24 +671,47 @@ When inviting the bot to a new Discord server, ensure it has the following permi
 ### Required Permissions
 - **General Permissions**
   - View Channels
-  - Manage Roles (for guild management)
-  - Read Message History
-  - Add Reactions
+  - Manage Roles
+  - Kick Members
+  - Manage Nicknames
+  - Moderate Members
+  - View Channel Insights
 
-- **Text Channel Permissions**
+- **Text Permissions**
   - Send Messages
-  - Send Messages in Threads
   - Create Public Threads
   - Create Private Threads
+  - Send Messages in Threads
   - Embed Links
   - Attach Files
   - Read Message History
+  - Add Reactions
   - Use Slash Commands
 
-- **Member Permissions**
-  - Kick Members (optional, only if using kick functionality with /guildremove)
-  - View Member Insights
-  - Manage Nicknames
+### Not Required Permissions
+The following permissions are NOT needed:
+- Administrator
+- View Audit Log
+- Manage Server
+- Manage Channels
+- Ban Members
+- Create Instant Invite
+- Manage Expressions
+- Create Expressions
+- Manage Webhooks
+- Manage Events
+- Create Events
+- View Server Insights
+- View Server Subscription Insights
+- Send TTS Messages
+- Manage Messages
+- Manage Threads
+- Mention Everyone
+- Use External Emojis
+- Use External Stickers
+- Use Embedded Activities
+- Use External Apps
+- Create Polls
 
 ### Permission Integer
 You can use the following permission integer when creating an invite link:

@@ -25,7 +25,8 @@ from src.database.operations import (delete_afk_entries, get_active_afk,
                                    sync_clan_memberships, get_clan_membership_history,
                                    extend_afk, set_guild_welcome_message, get_guild_welcome_message,
                                    add_user_to_guild, get_all_welcome_messages, remove_user_from_guild,
-                                   get_user_event_history, mark_event_as_processed)
+                                   get_user_event_history, mark_event_as_processed,
+                                   get_clan_membership_changes)
 from src.utils.time_parser import parse_date, parse_time, parse_datetime
 from src.services.raidhelper import RaidHelperService
 from src.services.google_sheets import GoogleSheetsService
@@ -49,11 +50,24 @@ load_dotenv()
 # Get configuration from environment
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = int(os.getenv("DISCORD_GUILD_ID", "0"))
-ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
-OFFICER_ROLE_ID = int(os.getenv("OFFICER_ROLE_ID", "0"))
+
+# Global variables
 CLAN1_ROLE_ID = int(os.getenv("CLAN1_ROLE_ID", "0"))  # Clan 1
 CLAN2_ROLE_ID = int(os.getenv("CLAN2_ROLE_ID", "0"))  # Clan 2
 BOT_NAME = os.getenv("BOT_NAME", "Requiem Bot")
+
+# Get admin and officer role IDs from environment
+def get_admin_role_ids():
+    """Get list of admin role IDs from environment."""
+    return [int(role_id.strip()) for role_id in os.getenv("ADMIN_ROLE_IDS", "").split(",") if role_id.strip()]
+
+def get_officer_role_ids():
+    """Get list of officer role IDs from environment."""
+    return [int(role_id.strip()) for role_id in os.getenv("OFFICER_ROLE_IDS", "").split(",") if role_id.strip()]
+
+# Remove old single role variables
+# ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0"))
+# OFFICER_ROLE_ID = int(os.getenv("OFFICER_ROLE_ID", "0"))
 
 # Additional role IDs for clans
 CLAN1_ADDITIONAL_ROLES = [int(role_id.strip()) for role_id in os.getenv("CLAN1_ADDITIONAL_ROLES", "").split(",") if role_id.strip()]
@@ -288,7 +302,7 @@ class RequiemBot(commands.Bot):
             except Exception as e:
                 logging.error(f"Error in guildadd_command: {e}")
                 await interaction.followup.send(
-                    f"❌ Ein Fehler ist aufgetreten: {str(e)}", 
+                    f"❌ An error occurred: {str(e)}", 
                     ephemeral=True
                 )
 
@@ -347,7 +361,7 @@ class RequiemBot(commands.Bot):
             except Exception as e:
                 logging.error(f"Error in guildremove_command: {e}")
                 await interaction.followup.send(
-                    f"❌ Ein Fehler ist aufgetreten: {str(e)}", 
+                    f"❌ An error occurred: {str(e)}", 
                     ephemeral=True
                 )
 
@@ -584,16 +598,104 @@ class RequiemBot(commands.Bot):
             
         logging.info("------")
 
+    async def on_member_remove(self, member: discord.Member):
+        """Called when a member leaves the server."""
+        try:
+            logging.info(f"Member {member.name} (ID: {member.id}) left the server")
+            
+            with get_db_session() as db:
+                # Get user from database
+                user = get_or_create_user(
+                    db,
+                    str(member.id),
+                    member.name,
+                    member.display_name
+                )
+                
+                # Check if user was in any clan
+                for role_id in [CLAN1_ROLE_ID, CLAN2_ROLE_ID]:
+                    try:
+                        remove_user_from_guild(db, user, str(role_id))
+                        logging.info(f"Removed {member.name} from clan with role ID {role_id}")
+                    except ValueError:
+                        # User wasn't in this clan
+                        pass
+                        
+        except Exception as e:
+            logging.error(f"Error handling member remove event: {e}")
+
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        """Called when a member's roles are updated."""
+        try:
+            # Check for clan role changes
+            before_clan1 = any(role.id == CLAN1_ROLE_ID for role in before.roles)
+            after_clan1 = any(role.id == CLAN1_ROLE_ID for role in after.roles)
+            before_clan2 = any(role.id == CLAN2_ROLE_ID for role in before.roles)
+            after_clan2 = any(role.id == CLAN2_ROLE_ID for role in after.roles)
+            
+            # If no clan role changes, return
+            if before_clan1 == after_clan1 and before_clan2 == after_clan2:
+                return
+                
+            logging.info(f"Clan role change detected for {after.name} (ID: {after.id})")
+            
+            with get_db_session() as db:
+                user = get_or_create_user(
+                    db,
+                    str(after.id),
+                    after.name,
+                    after.display_name
+                )
+                
+                # Handle Clan 1 changes
+                if before_clan1 and not after_clan1:
+                    # User lost Clan 1 role
+                    try:
+                        remove_user_from_guild(db, user, str(CLAN1_ROLE_ID))
+                        logging.info(f"Removed {after.name} from {CLAN1_NAME}")
+                    except ValueError:
+                        pass
+                        
+                # Handle Clan 2 changes
+                if before_clan2 and not after_clan2:
+                    # User lost Clan 2 role
+                    try:
+                        remove_user_from_guild(db, user, str(CLAN2_ROLE_ID))
+                        logging.info(f"Removed {after.name} from {CLAN2_NAME}")
+                    except ValueError:
+                        pass
+                        
+        except Exception as e:
+            logging.error(f"Error handling member update event: {e}")
+
 def has_required_role():
-    """Check if user has required role."""
+    """Check if user has required role (Admin or Officer)."""
     async def predicate(interaction: discord.Interaction):
-        return any(role.id in [ADMIN_ROLE_ID, OFFICER_ROLE_ID] for role in interaction.user.roles)
+        admin_role_ids = get_admin_role_ids()
+        officer_role_ids = get_officer_role_ids()
+        
+        # Check if user has any of the required roles
+        user_roles = [role.id for role in interaction.user.roles]
+        has_admin = any(role_id in user_roles for role_id in admin_role_ids)
+        has_officer = any(role_id in user_roles for role_id in officer_role_ids)
+        
+        if not (has_admin or has_officer):
+            raise app_commands.MissingPermissions(["Admin or Officer role required"])
+        return True
     return app_commands.check(predicate)
 
 def has_admin_role():
     """Check if user has admin role."""
     async def predicate(interaction: discord.Interaction):
-        return any(role.id == ADMIN_ROLE_ID for role in interaction.user.roles)
+        admin_role_ids = get_admin_role_ids()
+        
+        # Check if user has any of the admin roles
+        user_roles = [role.id for role in interaction.user.roles]
+        has_admin = any(role_id in user_roles for role_id in admin_role_ids)
+        
+        if not has_admin:
+            raise app_commands.MissingPermissions(["Admin role required"])
+        return True
     return app_commands.check(predicate)
 
 async def afk(interaction, start_date, start_time, end_date, end_time, reason):
@@ -710,7 +812,7 @@ async def afklist(interaction: discord.Interaction):
     """List all AFK users."""
     try:
         # Check if user is admin/officer
-        is_admin = any(role.id in [ADMIN_ROLE_ID, OFFICER_ROLE_ID] for role in interaction.user.roles)
+        is_admin = any(role.id in get_admin_role_ids() + get_officer_role_ids() for role in interaction.user.roles)
         
         # For regular users, check clan membership
         user_clan_role_id = None
@@ -952,7 +1054,7 @@ async def afkdelete(interaction: discord.Interaction, user: discord.Member, all_
     """Delete AFK entries for a user."""
     try:
         # Check if user has required role
-        if not any(role.id in [ADMIN_ROLE_ID, OFFICER_ROLE_ID] for role in interaction.user.roles):
+        if not any(role.id in get_admin_role_ids() + get_officer_role_ids() for role in interaction.user.roles):
             await interaction.response.send_message(
                 "❌ You don't have permission to use this command!",
                 ephemeral=True
@@ -1412,94 +1514,63 @@ async def clan_changes(
     days: int = 7
 ):
     """Show recent clan membership changes."""
-    try:
-        await interaction.response.defer()
+    # Group changes by clan
+    changes_by_clan = {}
+    
+    with get_db_session() as db:
+        # Get changes for the specified time period
+        start_date = datetime.utcnow() - timedelta(days=days)
+        changes = get_clan_membership_changes(db, clan, start_date)
         
-        # Convert clan name to role ID if provided
-        clan_role_id = None
-        if clan:
-            clan = clan.lower()
-            if clan in CLAN1_ALIASES:
-                clan_role_id = str(CLAN1_ROLE_ID)
-            elif clan in CLAN2_ALIASES:
-                clan_role_id = str(CLAN2_ROLE_ID)
-            else:
-                await interaction.followup.send(
-                    f"❌ Invalid clan name. Please use one of: {', '.join(CLAN1_ALIASES + CLAN2_ALIASES)}",
-                    ephemeral=True
-                )
-                return
+        # Create embeds for each clan
+        embeds = []
         
-        # Calculate date range
-        end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days)
+        for user, membership in changes:
+            clan_role_id = membership.clan_role_id
+            if clan_role_id not in changes_by_clan:
+                changes_by_clan[clan_role_id] = []
+            changes_by_clan[clan_role_id].append((user, membership))
         
-        with get_db_session() as db:
-            changes = get_clan_membership_history(
-                db,
-                clan_role_id=clan_role_id,
-                start_date=start_date,
-                end_date=end_date,
-                include_inactive=True
+        for clan_role_id, clan_changes in changes_by_clan.items():
+            # Create embed for each clan
+            embed = discord.Embed(
+                title=f"Clan Changes - {CLAN1_NAME if clan_role_id == str(CLAN1_ROLE_ID) else CLAN2_NAME}",
+                description=f"Changes in the last {days} days",
+                color=discord.Color.blue()
             )
             
-            if not changes:
-                await interaction.followup.send(
-                    f"No clan changes found in the last {days} days.",
-                    ephemeral=True
+            for user, membership in clan_changes:
+                # Format user and membership information
+                user_info = f"{user.username} ({user.display_name})"
+                joined_timestamp = f"<t:{int(membership.joined_at.timestamp())}:f>"
+                
+                # Add status indicator (green dot for active, red dot for inactive)
+                status_indicator = "🟢" if membership.is_active else "🔴"
+                status = "Active" if membership.is_active else "Inactive"
+                
+                # Format status message
+                status_msg = f"{status_indicator} {status}"
+                if membership.left_at:
+                    left_timestamp = f"<t:{int(membership.left_at.timestamp())}:f>"
+                    status_msg += f"\nLeft: {left_timestamp}"
+                
+                embed.add_field(
+                    name=user_info,
+                    value=f"Joined: {joined_timestamp}\nStatus: {status_msg}",
+                    inline=False
                 )
-                return
             
-            # Gruppiere Änderungen nach Clan
-            clan_groups = {}
-            for user, membership in changes:
-                clan_name = "Unknown"
-                if membership.clan_role_id == str(CLAN1_ROLE_ID):
-                    clan_name = CLAN1_NAME
-                elif membership.clan_role_id == str(CLAN2_ROLE_ID):
-                    clan_name = CLAN2_NAME
-                
-                if clan_name not in clan_groups:
-                    clan_groups[clan_name] = []
-                clan_groups[clan_name].append((user, membership))
-
-            # Erstelle Embeds für jeden Clan
-            embeds = []
-            for clan_name, clan_changes in clan_groups.items():
-                current_embed = discord.Embed(
-                    title=f"Clan Changes - {clan_name}",
-                    description=f"Changes in the last {days} days",
-                    color=discord.Color.blue()
-                )
-                
-                for user, membership in clan_changes:
-                    # Formatiere den Zeitstempel für joined_at
-                    joined_str = f"<t:{int(membership.joined_at.timestamp())}:f>"
-                    
-                    # Formatiere den Zeitstempel für left_at, falls vorhanden
-                    if membership.left_at:
-                        status = "🔴"
-                        timestamp = f"<t:{int(membership.left_at.timestamp())}:f>"
-                        field_name = f"{status} Left: {user.username}"
-                    else:
-                        status = "🟢"
-                        timestamp = joined_str
-                        field_name = f"{status} Joined: {user.username}"
-                    
-                    field_value = f"Time: {timestamp}\nDiscord ID: {user.discord_id}"
-                    
-                    current_embed.add_field(
-                        name=field_name,
-                        value=field_value,
-                        inline=False
-                    )
-                
-                embeds.append(current_embed)
+            embed.add_field(
+                name="Discord ID",
+                value=f"{user.discord_id}",
+                inline=False
+            )
             
-            # Sende alle Embeds
-            for embed in embeds:
-                await interaction.followup.send(embed=embed)
-            
+            embeds.append(embed)
+    
+    try:
+        for embed in embeds:
+            await interaction.followup.send(embed=embed)
     except Exception as e:
         logging.error(f"Error showing clan changes: {e}")
         await interaction.followup.send(
@@ -1827,22 +1898,22 @@ async def eventhistory(interaction: discord.Interaction, user: discord.Member, l
     await interaction.response.defer()
 
     with get_db_session() as db:
-        history = get_user_event_history(db, str(user.id), limit)
+        signups = get_user_event_history(db, str(user.id), limit)
         
-        if not history:
-            await interaction.followup.send(f"{user.display_name} hat noch an keinen Events teilgenommen.")
+        if not signups:
+            await interaction.followup.send(f"{user.display_name} has not participated in any events yet.")
             return
         
         # Create embed
         embed = discord.Embed(
-            title=f"Event Historie für {user.display_name}",
+            title=f"Event History for {user.display_name}",
             color=discord.Color.blue()
         )
         
-        for signup in history:
+        for signup in signups:
             event = signup.event
             value = f"Status: {signup.status}\n"
-            value += f"Klasse: {signup.class_name or 'N/A'}\n"
+            value += f"Class: {signup.class_name or 'N/A'}\n"
             value += f"Spec: {signup.spec_name or 'N/A'}\n"
             value += f"Position: {signup.position or 'N/A'}"
             

@@ -50,10 +50,9 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - DISCORD_GUILD_ID=${DISCORD_GUILD_ID}
-      - ADMIN_ROLE_ID=${ADMIN_ROLE_ID}
-      - OFFICER_ROLE_ID=${OFFICER_ROLE_ID}
-      - CLAN1_ROLE_ID=${CLAN1_ROLE_ID}
-      - CLAN2_ROLE_ID=${CLAN2_ROLE_ID}
+      - BOT_NAME=${BOT_NAME}
+      - ADMIN_ROLE_IDS=${ADMIN_ROLE_IDS}
+      - OFFICER_ROLE_IDS=${OFFICER_ROLE_IDS}
     restart: unless-stopped
     logging:
       driver: "json-file"
