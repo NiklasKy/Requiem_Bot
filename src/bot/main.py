@@ -816,12 +816,11 @@ async def afkreturn(interaction: discord.Interaction):
             
             if updated > 0:
                 await interaction.response.send_message(
-                    "✅ Welcome back! Your AFK status has been cleared.",
-                    ephemeral=True
+                    f"✅ {interaction.user.display_name} has returned and is no longer AFK!"
                 )
             else:
                 await interaction.response.send_message(
-                    "❌ You don't have any active AFK entries.",
+                    f"❌ {interaction.user.display_name} has no active AFK entries.",
                     ephemeral=True
                 )
                 
@@ -1109,13 +1108,11 @@ async def afkdelete(interaction: discord.Interaction, user: discord.Member, all_
             if deleted > 0:
                 if afk_id:
                     await interaction.response.send_message(
-                        f"✅ Successfully deleted AFK entry {afk_id} for {user.display_name}.",
-                        ephemeral=True
+                        f"✅ Successfully deleted AFK entry {afk_id} for {user.display_name}."
                     )
                 else:
                     await interaction.response.send_message(
-                        f"✅ Deleted {deleted} AFK {'entries' if deleted > 1 else 'entry'} for {user.display_name}.",
-                        ephemeral=True
+                        f"✅ Deleted {deleted} AFK {'entries' if deleted > 1 else 'entry'} for {user.display_name}."
                     )
             else:
                 if afk_id:
@@ -1649,9 +1646,8 @@ async def afkextend(interaction: discord.Interaction, afk_id: int, hours: int):
             afk_entry = extend_afk(db, user, afk_id, hours)
             
             await interaction.response.send_message(
-                f"✅ Successfully extended your AFK entry! (all times in UTC)\n"
-                f"New end time: <t:{int(afk_entry.end_date.timestamp())}:f>",
-                ephemeral=True
+                f"✅ {interaction.user.display_name} has extended their AFK time! (all times in UTC)\n"
+                f"New end time: <t:{int(afk_entry.end_date.timestamp())}:f>"
             )
             
     except ValueError as e:
