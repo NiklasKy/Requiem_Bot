@@ -1556,72 +1556,55 @@ async def clan_changes(
             
             # Create embeds for each clan
             embeds = []
+            current_embed = None
+            field_count = 0
             
             for user, membership in changes:
                 clan_role_id = membership.clan_role_id
-                if clan_role_id not in changes_by_clan:
-                    changes_by_clan[clan_role_id] = []
-                changes_by_clan[clan_role_id].append((user, membership))
-            
-            for clan_role_id, clan_changes in changes_by_clan.items():
-                # Create embed for each clan
-                embed = discord.Embed(
-                    title=f"Clan Changes - {CLAN1_NAME if clan_role_id == str(CLAN1_ROLE_ID) else CLAN2_NAME}",
-                    description=f"Changes in the last {days} days",
-                    color=discord.Color.blue()
-                )
                 
-                for user, membership in clan_changes:
-                    # Format user and membership information
-                    user_info = f"{user.username} ({user.display_name})"
-                    joined_timestamp = f"<t:{int(membership.joined_at.timestamp())}:f>"
-                    
-                    # Add status indicator (green dot for active, red dot for inactive)
-                    status_indicator = "🟢" if membership.is_active else "🔴"
-                    status = "Active" if membership.is_active else "Inactive"
-                    
-                    # Format status message
-                    status_msg = f"{status_indicator} {status}"
-                    if membership.left_at:
-                        left_timestamp = f"<t:{int(membership.left_at.timestamp())}:f>"
-                        status_msg += f"\nLeft: {left_timestamp}"
-                    
-                    embed.add_field(
-                        name=user_info,
-                        value=f"Joined: {joined_timestamp}\nStatus: {status_msg}",
-                        inline=False
+                # Get clan name from environment variables
+                clan_name = "Unknown Clan"
+                if clan_role_id == os.getenv("CLAN1_ROLE_ID"):
+                    clan_name = os.getenv("CLAN1_NAME", "Clan 1")
+                elif clan_role_id == os.getenv("CLAN2_ROLE_ID"):
+                    clan_name = os.getenv("CLAN2_NAME", "Clan 2")
+                
+                # Create new embed if needed
+                if current_embed is None or field_count >= 25:
+                    current_embed = discord.Embed(
+                        title=f"Clan Changes (Last {days} days)",
+                        color=discord.Color.blue()
                     )
+                    embeds.append(current_embed)
+                    field_count = 0
                 
-                embeds.append(embed)
-            
-            # Send embeds one by one to handle the case where we have multiple clans
-            for embed in embeds:
-                try:
-                    await interaction.followup.send(embed=embed)
-                except discord.NotFound:
-                    # If the webhook is not found, try to send as a new message
-                    channel = interaction.channel
-                    if channel:
-                        await channel.send(embed=embed)
-                    else:
-                        logging.error("Could not send clan changes: Channel not found")
-                except Exception as e:
-                    logging.error(f"Error showing clan changes: {e}")
-                    continue
-
-    except Exception as e:
-        logging.error(f"Error in clan_changes: {e}")
-        try:
-            await interaction.followup.send(
-                "❌ An error occurred while fetching clan changes. Please try again later.",
-                ephemeral=True
-            )
-        except discord.NotFound:
-            # If the webhook is not found and we're handling an error, try to send to the channel
-            if interaction.channel:
-                await interaction.channel.send(
-                    "❌ An error occurred while fetching clan changes. Please try again later."
+                # Add field for this change
+                change_type = "Left" if membership.left_at else "Joined"
+                timestamp = membership.left_at if membership.left_at else membership.joined_at
+                
+                field_name = f"{clan_name} - {change_type}"
+                field_value = (
+                    f"User: {user.username}\n"
+                    f"Time: <t:{int(timestamp.timestamp())}:f>"
                 )
+                
+                current_embed.add_field(
+                    name=field_name,
+                    value=field_value,
+                    inline=False
+                )
+                field_count += 1
+            
+            # Send all embeds
+            for embed in embeds:
+                await interaction.followup.send(embed=embed)
+    
+    except Exception as e:
+        logging.error(f"Error showing clan changes: {e}")
+        await interaction.followup.send(
+            "An error occurred while showing clan changes.",
+            ephemeral=True
+        )
 
 async def afkextend(interaction: discord.Interaction, afk_id: int, hours: int):
     """Extend an existing AFK entry."""
