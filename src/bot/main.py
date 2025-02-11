@@ -452,13 +452,12 @@ class RequiemBot(commands.Bot):
                         f"❌ {str(e)}",
                         ephemeral=True
                     )
-                
-        except Exception as e:
-            logging.error(f"Error in guildremove command: {e}")
-            await interaction.followup.send(
-                f"❌ An error occurred: {str(e)}",
-                ephemeral=True
-            )
+                except Exception as e:
+                    logging.error(f"Error in guildremove command: {e}")
+                    await interaction.followup.send(
+                        f"❌ An error occurred: {str(e)}",
+                        ephemeral=True
+                    )
 
         @self.tree.command(
             name="eventhistory",
