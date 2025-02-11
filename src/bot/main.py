@@ -380,14 +380,85 @@ class RequiemBot(commands.Bot):
             kick_from_discord: bool = False
         ):
             await interaction.response.defer()
-            try:
-                await guildremove(interaction, user, guild, kick_from_discord)
-            except Exception as e:
-                logging.error(f"Error in guildremove_command: {e}")
+            
+            # Convert guild name to role ID
+            guild = guild.lower()
+            if guild in CLAN1_ALIASES:
+                guild_role_id = str(CLAN1_ROLE_ID)
+                guild_name = CLAN1_NAME
+                guild_role = interaction.guild.get_role(CLAN1_ROLE_ID)
+                additional_role_ids = CLAN1_ADDITIONAL_ROLES
+            elif guild in CLAN2_ALIASES:
+                guild_role_id = str(CLAN2_ROLE_ID)
+                guild_name = CLAN2_NAME
+                guild_role = interaction.guild.get_role(CLAN2_ROLE_ID)
+                additional_role_ids = CLAN2_ADDITIONAL_ROLES
+            else:
                 await interaction.followup.send(
-                    f"❌ An error occurred: {str(e)}", 
+                    f"❌ Invalid guild name. Please use one of: {', '.join(CLAN1_ALIASES + CLAN2_ALIASES)}",
                     ephemeral=True
                 )
+                return
+
+            with get_db_session() as db:
+                # Get or create user in database
+                db_user = get_or_create_user(
+                    db,
+                    str(user.id),
+                    user.name,
+                    user.display_name
+                )
+                
+                try:
+                    # Remove user from guild in database
+                    remove_user_from_guild(db, db_user, guild_role_id)
+                    
+                    # Remove Discord roles
+                    roles_removed = []
+                    
+                    # Remove main guild role
+                    if guild_role in user.roles:
+                        await user.remove_roles(guild_role)
+                        roles_removed.append(guild_role)
+                    
+                    # Remove additional roles
+                    for role_id in additional_role_ids:
+                        role = interaction.guild.get_role(role_id)
+                        if role and role in user.roles:
+                            await user.remove_roles(role)
+                            roles_removed.append(role)
+                    
+                    # Create success message with removed roles
+                    roles_text = ", ".join(role.name for role in roles_removed)
+                    message = f"✅ Successfully removed {user.mention} from {guild_name}!\nRemoved roles: {roles_text}"
+                    
+                    # Kick user if requested
+                    if kick_from_discord:
+                        try:
+                            await user.kick(reason=f"Removed from {guild_name}")
+                            message += "\nUser was kicked from the Discord server."
+                        except discord.Forbidden:
+                            message += "\n⚠️ Could not kick user (insufficient permissions)"
+                        except Exception as e:
+                            message += f"\n⚠️ Could not kick user: {str(e)}"
+                    
+                    await interaction.followup.send(
+                        message,
+                        ephemeral=False
+                    )
+                    
+                except ValueError as e:
+                    await interaction.followup.send(
+                        f"❌ {str(e)}",
+                        ephemeral=True
+                    )
+                
+        except Exception as e:
+            logging.error(f"Error in guildremove command: {e}")
+            await interaction.followup.send(
+                f"❌ An error occurred: {str(e)}",
+                ephemeral=True
+            )
 
         @self.tree.command(
             name="eventhistory",
@@ -1832,125 +1903,6 @@ async def welcomeshow(
                 f"❌ An error occurred: {str(e)}",
                 ephemeral=True
             )
-
-async def guildremove(
-    interaction: discord.Interaction,
-    user: discord.Member,
-    guild: str,
-    kick_from_discord: bool = False
-):
-    """Remove a user from a guild."""
-    try:
-        # Convert guild name to role ID
-        guild = guild.lower()
-        if guild in CLAN1_ALIASES:
-            guild_role_id = str(CLAN1_ROLE_ID)
-            guild_name = CLAN1_NAME
-            guild_role = interaction.guild.get_role(CLAN1_ROLE_ID)
-            additional_role_ids = CLAN1_ADDITIONAL_ROLES
-        elif guild in CLAN2_ALIASES:
-            guild_role_id = str(CLAN2_ROLE_ID)
-            guild_name = CLAN2_NAME
-            guild_role = interaction.guild.get_role(CLAN2_ROLE_ID)
-            additional_role_ids = CLAN2_ADDITIONAL_ROLES
-        else:
-            await interaction.response.send_message(
-                f"❌ Invalid guild name. Please use one of: {', '.join(CLAN1_ALIASES + CLAN2_ALIASES)}",
-                ephemeral=True
-            )
-            return
-
-        with get_db_session() as db:
-            # Get or create user in database
-            db_user = get_or_create_user(
-                db,
-                str(user.id),
-                user.name,
-                user.display_name
-            )
-            
-            try:
-                # Remove user from guild in database
-                remove_user_from_guild(db, db_user, guild_role_id)
-                
-                # Remove Discord roles
-                roles_removed = []
-                
-                # Remove main guild role
-                if guild_role in user.roles:
-                    await user.remove_roles(guild_role)
-                    roles_removed.append(guild_role)
-                
-                # Remove additional roles
-                for role_id in additional_role_ids:
-                    role = interaction.guild.get_role(role_id)
-                    if role and role in user.roles:
-                        await user.remove_roles(role)
-                        roles_removed.append(role)
-                
-                # Create success message with removed roles
-                roles_text = ", ".join(role.name for role in roles_removed)
-                message = f"✅ Successfully removed {user.mention} from {guild_name}!\nRemoved roles: {roles_text}"
-                
-                # Kick user if requested
-                if kick_from_discord:
-                    try:
-                        await user.kick(reason=f"Removed from {guild_name}")
-                        message += "\nUser was kicked from the Discord server."
-                    except discord.Forbidden:
-                        message += "\n⚠️ Could not kick user (insufficient permissions)"
-                    except Exception as e:
-                        message += f"\n⚠️ Could not kick user: {str(e)}"
-                
-                await interaction.response.send_message(
-                    message,
-                    ephemeral=False
-                )
-                
-            except ValueError as e:
-                await interaction.response.send_message(
-                    f"❌ {str(e)}",
-                    ephemeral=True
-                )
-            
-    except Exception as e:
-        logging.error(f"Error in guildremove command: {e}")
-        await interaction.response.send_message(
-            f"❌ An error occurred: {str(e)}",
-            ephemeral=True
-        )
-
-async def eventhistory(interaction: discord.Interaction, user: discord.Member, limit: int = 10):
-    """Show event history for a user."""
-    await interaction.response.defer()
-
-    with get_db_session() as db:
-        signups = get_user_event_history(db, str(user.id), limit)
-        
-        if not signups:
-            await interaction.followup.send(f"{user.display_name} has not participated in any events yet.")
-            return
-        
-        # Create embed
-        embed = discord.Embed(
-            title=f"Event History for {user.display_name}",
-            color=discord.Color.blue()
-        )
-        
-        for signup in signups:
-            event = signup.event
-            value = f"Status: {signup.status}\n"
-            value += f"Class: {signup.class_name or 'N/A'}\n"
-            value += f"Spec: {signup.spec_name or 'N/A'}\n"
-            value += f"Position: {signup.position or 'N/A'}"
-            
-            embed.add_field(
-                name=f"{event.title} ({event.start_time.strftime('%d.%m.%Y %H:%M')})",
-                value=value,
-                inline=False
-            )
-        
-        await interaction.followup.send(embed=embed)
 
 async def guildadd(
     interaction: discord.Interaction,

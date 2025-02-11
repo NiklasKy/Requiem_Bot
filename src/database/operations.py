@@ -457,9 +457,9 @@ def get_clan_active_and_future_afk(
     """Get all active and future AFK entries for a clan.
     
     Returns entries where:
-    1. ended_at is NULL AND
+    1. is_deleted is False AND
     2. Either:
-       - is_active is True (current active entries) OR
+       - is_active is True OR
        - start_date is in the future
     
     Args:
@@ -476,15 +476,9 @@ def get_clan_active_and_future_afk(
         .join(AFKEntry, User.id == AFKEntry.user_id)
         .filter(
             and_(
-                AFKEntry.ended_at == None,
+                AFKEntry.is_deleted == False,
                 or_(
-                    # Active entries
-                    and_(
-                        AFKEntry.is_active == True,
-                        AFKEntry.start_date <= current_time,
-                        AFKEntry.end_date >= current_time
-                    ),
-                    # Future entries
+                    AFKEntry.is_active == True,
                     AFKEntry.start_date > current_time
                 )
             )
@@ -494,7 +488,7 @@ def get_clan_active_and_future_afk(
     if clan_role_id:
         query = query.filter(User.clan_role_id == clan_role_id)
     
-    return query.order_by(AFKEntry.start_date.asc()).all() 
+    return query.order_by(AFKEntry.start_date.asc()).all()
 
 def sync_clan_memberships(
     db: Session,
