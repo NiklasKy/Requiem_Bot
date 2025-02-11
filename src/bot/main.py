@@ -26,7 +26,7 @@ from src.database.operations import (delete_afk_entries, get_active_afk,
                                    extend_afk, set_guild_welcome_message, get_guild_welcome_message,
                                    add_user_to_guild, get_all_welcome_messages, remove_user_from_guild,
                                    get_user_event_history, mark_event_as_processed,
-                                   get_clan_membership_changes)
+                                   get_clan_membership_changes, add_guild_info)
 from src.utils.time_parser import parse_date, parse_time, parse_datetime
 from src.services.raidhelper import RaidHelperService
 from src.services.google_sheets import GoogleSheetsService
@@ -138,6 +138,30 @@ class RequiemBot(commands.Bot):
         logging.info("Initializing database...")
         Base.metadata.create_all(engine)
         logging.info("Database initialized successfully")
+
+        # Update guild information
+        logging.info("Updating guild information...")
+        with get_db_session() as db:
+            # Get guild information from .env
+            guilds = [
+                {
+                    "role_id": os.getenv("CLAN1_ROLE_ID"),
+                    "name": os.getenv("CLAN1_NAME")
+                },
+                {
+                    "role_id": os.getenv("CLAN2_ROLE_ID"),
+                    "name": os.getenv("CLAN2_NAME")
+                }
+            ]
+            
+            # Update guild information in database
+            for guild in guilds:
+                if guild["role_id"] and guild["name"]:
+                    logging.info(f"Updating guild: {guild['name']} with role ID: {guild['role_id']}")
+                    add_guild_info(db, guild["role_id"], guild["name"])
+                else:
+                    logging.warning(f"Missing information for guild: {guild}")
+        logging.info("Guild information updated successfully")
 
         # Update AFK entries' active status
         with get_db_session() as db:
